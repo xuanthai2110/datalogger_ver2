@@ -1,0 +1,9 @@
+2026-08-04 10:57:18,374 - TestLogger - INFO - Day la log test o muc INFO
+2026-08-04 10:57:18,378 - TestLogger - WARNING - Day la log test o muc WARNING
+2026-08-04 10:57:18,379 - TestLogger - ERROR - Day la log test o muc ERROR
+2026-08-06 13:26:03,610 - backend.communication.mqtt_subscriber - INFO - [MQTT] Subscribed to controls/projects/1001/schedules/# with QoS 1
+2026-08-06 13:26:03,610 - backend.communication.mqtt_subscriber - INFO - [MQTT] Subscribed to telemetry/realtime/enable/1001 with QoS 1
+2026-08-06 13:26:03,610 - backend.communication.mqtt_subscriber - INFO - [MQTT] Subscribed to controls/projects/1002/schedules/# with QoS 1
+2026-08-06 13:26:03,611 - backend.communication.mqtt_subscriber - INFO - [MQTT] Subscribed to telemetry/realtime/enable/1002 with QoS 1
+2026-08-06 13:26:03,611 - backend.communication.modbus_tcp - ERROR - [TCP] Cannot connect to 192.0.2.1:502
+2026-08-06 13:26:09,611 - backend.communication.modbus_tcp - ERROR - [TCP] Cannot connect to 192.0.2.1:502

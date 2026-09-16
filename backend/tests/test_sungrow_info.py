@@ -11,7 +11,7 @@ if BASE_DIR not in sys.path:
 
 from backend.communication.modbus_rtu import ModbusRTU
 from backend.core import settings
-from backend.drivers.sungrow_sg110cx import SungrowSG110CX
+from backend.drivers.inverters.sungrow_sg110cx import SungrowSG110CX
 
 
 def _build_transport():

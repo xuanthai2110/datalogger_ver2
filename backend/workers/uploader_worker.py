@@ -8,6 +8,11 @@ from backend.services.telemetry_service import TelemetryService
 
 logger = logging.getLogger(__name__)
 
+# Số bản ghi tối đa giữ trong outbox.
+# Nếu server liên tục trả 4xx (record bị giữ lại), outbox sẽ bị giới hạn tại đây.
+# Các record cũ nhất sẽ bị xóa trước để nhường chỗ cho dữ liệu mới hơn.
+MAX_OUTBOX_ROWS = 500
+
 class UploaderWorker(threading.Thread):
     def __init__(self, cache_db: CacheDB, project_svc: ProjectService, realtime_db: RealtimeDB, upload_interval: float = 300.0):
         super().__init__()
@@ -53,6 +58,10 @@ class UploaderWorker(threading.Thread):
                     logger.info(f"Uploader Worker: Generated {new_payloads} new payloads. Initiating upload...")
                     # 4. Gửi các gói mới vừa được đưa vào outbox
                     self.uploader.upload()
+
+                # 5. Giới hạn kích thước outbox để tránh tích lũy vô hạn
+                #    (xảy ra khi server liên tục trả 4xx và record bị giữ lại)
+                self.realtime_db.trim_outbox(MAX_OUTBOX_ROWS)
 
             except Exception as e:
                 logger.error(f"Error in Uploader Worker cycle: {e}")

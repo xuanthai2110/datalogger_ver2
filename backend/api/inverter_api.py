@@ -18,12 +18,68 @@ def get_project_service() -> ProjectService:
     return ProjectService(MetadataDB(app_config.METADATA_DB), RealtimeDB(app_config.REALTIME_DB))
 
 
+def _format_inverter_response(inv) -> dict:
+    if inv is None:
+        return None
+    data = asdict(inv)
+    is_act = bool(inv.is_active)
+    data["is_active"] = is_act
+    data["status"] = "Hoạt động" if is_act else "Ngưng hoạt động"
+    data["status_text"] = "Hoạt động" if is_act else "Ngưng hoạt động"
+    data["operating_status"] = "Hoạt động" if is_act else "Ngưng hoạt động"
+    data["state"] = "ACTIVE" if is_act else "INACTIVE"
+    return data
+
+
+def _normalize_inverter_body(body: dict) -> dict:
+    """Chuẩn hóa dữ liệu body truyền vào API (xử lý status, is_active, datetime string)."""
+    normalized = body.copy()
+
+    # 1. Ánh xạ các tên trường trạng thái
+    status_val = None
+    for k in ("is_active", "status", "state", "trang_thai"):
+        if k in normalized and normalized[k] is not None:
+            status_val = normalized[k]
+            break
+
+    if status_val is not None:
+        if isinstance(status_val, bool):
+            normalized["is_active"] = status_val
+        elif isinstance(status_val, (int, float)):
+            normalized["is_active"] = (status_val != 0)
+        elif isinstance(status_val, str):
+            s_lower = status_val.strip().lower()
+            if s_lower in ("false", "0", "off", "disabled", "inactive", "ngưng hoạt động", "ngung hoat dong", "ngừng hoạt động", "tắt", "tat", "stopped"):
+                normalized["is_active"] = False
+            elif s_lower in ("true", "1", "on", "enabled", "active", "đang hoạt động", "dang hoat dong", "bật", "bat", "running"):
+                normalized["is_active"] = True
+            else:
+                normalized["is_active"] = bool(status_val)
+
+    # 2. Chuẩn hóa datetime & foreign keys
+    for field in ("usage_start_at", "usage_end_at"):
+        if field in normalized and (normalized[field] == "" or normalized[field] == 0):
+            normalized[field] = None
+
+    if "replaced_by_id" in normalized:
+        val = normalized["replaced_by_id"]
+        if val == "" or val == 0 or val is None:
+            normalized["replaced_by_id"] = None
+        else:
+            try:
+                normalized["replaced_by_id"] = int(val)
+            except (ValueError, TypeError):
+                normalized["replaced_by_id"] = None
+
+    return normalized
+
+
 @router.get("")
 def list_inverters(svc: ProjectService = Depends(get_project_service)):
     """Trả về tất cả thông tin của tất cả inverter."""
     try:
         inverters = svc.get_all_inverters()
-        return [asdict(i) for i in inverters]
+        return [_format_inverter_response(i) for i in inverters]
     except Exception as e:
         logger.error(f"list_inverters error: {e}")
         return JSONResponse(status_code=500, content={"ok": False, "error": str(e)})
@@ -36,7 +92,7 @@ def get_inverter_id(inverter_id: int, svc: ProjectService = Depends(get_project_
         inv = svc.get_inverter_by_id(inverter_id)
         if not inv:
             return JSONResponse(status_code=404, content={"detail": [{"loc": ["path", "inverter_id"], "msg": "Inverter not found", "type": "not_found"}]})
-        return asdict(inv)
+        return _format_inverter_response(inv)
     except Exception as e:
         logger.error(f"get_inverter error: {e}")
         return JSONResponse(status_code=500, content={"ok": False, "error": str(e)})
@@ -61,13 +117,13 @@ def create_inverter(
 })):
     """Tạo inverter mới trong local DB qua Service."""
     try:
-        # Lọc các trường hợp lệ cho InverterCreate
+        norm_body = _normalize_inverter_body(body)
         valid_fields = {f.name for f in fields(InverterCreate)}
-        filtered_body = {k: v for k, v in body.items() if k in valid_fields and k != "id"}
+        filtered_body = {k: v for k, v in norm_body.items() if k in valid_fields and k != "id"}
         
         inv_id = svc.upsert_inverter(InverterCreate(**filtered_body))
         inv = svc.get_inverter_by_id(inv_id)
-        return asdict(inv)
+        return _format_inverter_response(inv)
     except Exception as e:
         logger.error(f"create_inverter error: {e}")
         return JSONResponse(status_code=500, content={"ok": False, "error": str(e)})
@@ -83,17 +139,31 @@ def update_inverter(
 })):
     """Cập nhật thông tin của inverter có id tương ứng qua Service."""
     try:
-        # Lọc các trường hợp lệ cho InverterUpdate
+        logger.info(f"[InverterAPI] PATCH /api/inverters/{inverter_id} - Raw body: {body}")
+        norm_body = _normalize_inverter_body(body)
+        logger.info(f"[InverterAPI] Normalized body: {norm_body}")
+        
         valid_fields = {f.name for f in fields(InverterUpdate)}
-        filtered_body = {k: v for k, v in body.items() if k in valid_fields and k != "id"}
+        filtered_body = {k: v for k, v in norm_body.items() if k in valid_fields and k != "id"}
+        logger.info(f"[InverterAPI] Filtered body for InverterUpdate: {filtered_body}")
         
         svc.patch_inverter(inverter_id, InverterUpdate(**filtered_body))
+        try:
+            svc.metadata_db.set_setting("polling_config_changed", "true")
+            logger.info("[InverterAPI] Triggered polling_config_changed flag in DB.")
+        except Exception as err:
+            logger.warning(f"[InverterAPI] Could not set polling_config_changed flag: {err}")
+
         inv = svc.get_inverter_by_id(inverter_id)
         if not inv:
+            logger.warning(f"[InverterAPI] Inverter ID {inverter_id} not found after patch")
             return JSONResponse(status_code=404, content={"ok": False, "error": "Inverter not found"})
-        return asdict(inv)
+        
+        resp = _format_inverter_response(inv)
+        logger.info(f"[InverterAPI] Update successful for ID {inverter_id} -> DB state: is_active={resp.get('is_active')}, status='{resp.get('status')}'")
+        return resp
     except Exception as e:
-        logger.error(f"update_inverter error: {e}")
+        logger.error(f"[InverterAPI] update_inverter error: {e}", exc_info=True)
         return JSONResponse(status_code=500, content={"ok": False, "error": str(e)})
 
 
@@ -110,3 +180,4 @@ def delete_inverter(inverter_id: int, svc: ProjectService = Depends(get_project_
     except Exception as e:
         logger.error(f"delete_inverter error: {e}")
         return JSONResponse(status_code=500, content={"ok": False, "error": str(e)})
+

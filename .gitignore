@@ -88,3 +88,4 @@ backend/Test_modbus.py
 backend/static/uploads/
 prod/
 backend/prod/
+*.mp4

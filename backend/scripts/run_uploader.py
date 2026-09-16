@@ -12,11 +12,10 @@ from backend.db_manager.realtime import RealtimeDB
 from backend.services.uploader_service import UploaderService
 from backend.core import settings
 
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-)
+from backend.core.logger import setup_logging
+setup_logging()
 logger = logging.getLogger("Uploader")
+
 
 def main():
     logger.info("Starting Telemetry Uploader Script...")

@@ -15,18 +15,19 @@ from backend.workers.persistence_worker import PersistenceWorker
 from backend.workers.build_tele_worker import BuildTeleWorker
 from backend.workers.schedule_worker import ScheduleWorker
 from backend.workers.evn_command_worker import EVNCommandWorker
+from backend.workers.zero_export_worker import ZeroExportWorker
 from backend.services.fault_service import FaultService
 from backend.services.project_service import ProjectService
 from backend.services.schedule_service import ScheduleService
 from backend.services.control_service import ControlService
+from backend.services.zero_export_service import ZeroExportService
 from backend.communication.mqtt_subscriber import MqttSubscriber
 from backend.core import settings
 
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-)
+from backend.core.logger import setup_logging
+setup_logging()
 logger = logging.getLogger("Launcher")
+
 
 def main():
     try:
@@ -72,8 +73,29 @@ def main():
             realtime_db=realtime_db,
             control_service=control_svc,
         )
-        
-        # 6. Schedule & MQTT
+
+        # 6. Zero Export
+        ze_service = ZeroExportService(
+            cache_db=cache_db,
+            metadata_db=meta_db,
+            control_service=control_svc,
+            polling_service=poll_worker.service,
+            schedule_service=schedule_svc,
+        )
+        ze_worker = ZeroExportWorker(
+            ze_service=ze_service,
+            polling_service=poll_worker.service,
+            interval=settings.ZERO_EXPORT_INTERVAL_SEC,
+        )
+        # Expose ze_service vào app.py để API endpoint có thể dùng (trong cùng process)
+        try:
+            import backend.app as _app_module
+            _app_module.ze_service_instance = ze_service
+            logger.info("[run_polling] ZeroExportService injected into app module.")
+        except Exception as _e:
+            logger.warning("[run_polling] Could not inject ze_service into app module: %s", _e)
+
+        # 7. Schedule & MQTT
         schedule_worker = ScheduleWorker(schedule_svc, control_svc, modbus_server=None, interval=1.0)
         
         mqtt_sub = MqttSubscriber(
@@ -97,7 +119,9 @@ def main():
         build_tele_worker.start()
         schedule_worker.start()
         evn_command_worker.start()
+        ze_worker.start()
         mqtt_sub.connect()
+        logger.info("ZeroExportWorker started.")
         
         logger.info("Polling Service operational. Press Ctrl+C to exit.")
         while True:

@@ -57,6 +57,15 @@ def get_dashboard_summary(svc: MonitoringService = Depends(get_monitoring_servic
         logger.error(f"get_dashboard_summary error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
+@router.get("/power-flow")
+def get_power_flow_data(project_id: int = None, svc: MonitoringService = Depends(get_monitoring_service), current_user = Depends(get_current_user_id)):
+    """Lấy dữ liệu sơ đồ dòng công suất Power Flow realtime."""
+    try:
+        return svc.get_power_flow(project_id)
+    except Exception as e:
+        logger.error(f"get_power_flow_data error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
 @router.get("/project/{project_id}/range")
 def get_project_history(project_id: int, start: str, end: str, svc: MonitoringService = Depends(get_monitoring_service), current_user = Depends(get_current_user_id)):
     """Lấy dữ liệu lịch sử của dự án trong khoảng thời gian (start/end format YYYY-MM-DD HH:MM:SS)."""

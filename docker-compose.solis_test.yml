@@ -1,0 +1,17 @@
+version: '3.8'
+
+services:
+  solis-modbus-test:
+    build:
+      context: .
+      dockerfile: Dockerfile.solis_test
+    container_name: solis_modbus_test
+    restart: unless-stopped
+    network_mode: "host" # Allows direct access to local subnet/inverter IP
+    environment:
+      - MODBUS_HOST=192.168.1.100    # THAY THẾ BẰNG IP CỦA INVERTER / GATEWAY
+      - MODBUS_PORT=502              # CỔNG MODBUS TCP (MẶC ĐỊNH 502)
+      - MODBUS_SLAVE=1               # SLAVE ID / UNIT ID (MẶC ĐỊNH 1)
+      - MODBUS_TIMEOUT=3.0           # THỜI GIAN CHỜ (GIÂY)
+      - OFFSET_MODE=40001            # CHẾ ĐỘ TÍNH OFFSET: 40001 (mặc định), 40000, HOẶC raw
+      - READ_INTERVAL=5              # ĐỌC LẶP LẠI MỖI 5 GIÂY (0 = ĐỌC 1 LẦN)

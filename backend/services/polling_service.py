@@ -98,18 +98,30 @@ class PollingService:
     def get_polling_config(self, force_refresh: bool = False) -> List[Dict[str, Any]]:
         """Lấy cấu hình polling (Projects & Inverters) từ RAM Cache hoặc Database"""
         now = time.time()
-        if force_refresh or not self._config_cache or (now - self._last_refresh > settings.CONFIG_REFRESH_INTERVAL):
-            logger.info("Refreshing Polling Configuration Cache from DB through Service...")
+        config_changed = False
+        try:
+            if self.project_svc and self.project_svc.metadata_db:
+                if self.project_svc.metadata_db.get_setting("polling_config_changed", "false") == "true":
+                    config_changed = True
+                    self.project_svc.metadata_db.set_setting("polling_config_changed", "false")
+        except Exception:
+            pass
+
+        if force_refresh or config_changed or not self._config_cache or (now - self._last_refresh > 5):
+            if config_changed or force_refresh or not self._config_cache:
+                logger.info("[PollingService] Refreshing Polling Configuration Cache from DB (config updated)...")
+            else:
+                logger.debug("[PollingService] Refreshing Polling Configuration Cache from DB (timer)...")
             projects = self.project_svc.get_projects()
             new_cache = []
             
             for project in projects:
                 inverters = self.project_svc.get_inverters_by_project(project.id)
-                active_inverters = [inv for inv in inverters if inv.is_active]
+                active_inverters = [inv for inv in inverters if getattr(inv, "is_active", True)]
                 
                 # EVN: Lấy danh sách meters của project
                 meters = self.project_svc.get_meters_by_project(project.id)
-                active_meters = [m for m in meters if m.is_active]
+                active_meters = [m for m in meters if getattr(m, "is_active", True)]
 
                 new_cache.append({
                     "project": project,
@@ -126,38 +138,73 @@ class PollingService:
         if not brand or not model:
             return None
         
-        # Sanitize for filename: brand_model.py (Sungrow_SG110CX -> sungrow_sg110cx.py)
-        clean_brand = brand.lower().replace(" ", "_").replace("-", "_")
-        clean_model = model.lower().replace(" ", "_").replace("-", "_")
-        module_name = f"backend.drivers.{clean_brand}_{clean_model}"
+        b_low = brand.lower()
+        m_low = model.lower()
+        
+        # Explicit mapping cho các model Solis phổ biến
+        if b_low == "solis":
+            if "s6" in m_low or "eh3p99" in m_low:
+                from backend.drivers.inverters.solis_S6_EH3P99_9K10_NV_YD_H import SolisS6HybridDriver
+                return SolisS6HybridDriver(transport, slave_id=slave_id)
+            elif "110k" in m_low:
+                from backend.drivers.inverters.solis_110k import Solis110k
+                return Solis110k(transport, slave_id=slave_id)
+            elif "100k" in m_low:
+                from backend.drivers.inverters.solis_100k import Solis100k
+                return Solis100k(transport, slave_id=slave_id)
+
+        # Try loading from backend.drivers.inverters subfolder first
+        clean_brand = b_low.replace(" ", "_").replace("-", "_").replace(".", "_")
+        clean_model = m_low.replace(" ", "_").replace("-", "_").replace(".", "_")
         
         # Sanitize for classname: Brandmodel (Sungrow_SG110CX -> Sungrowsg110cx)
-        clean_model_class = model.lower().replace(" ", "").replace("-", "").replace("_", "")
+        clean_model_class = m_low.replace(" ", "").replace("-", "").replace("_", "").replace(".", "")
         class_name = f"{brand.capitalize()}{clean_model_class}"
         
-        try:
-            module = importlib.import_module(module_name)
-            driver_class = getattr(module, class_name)
-            return driver_class(transport, slave_id=slave_id)
-        except (ImportError, AttributeError) as e:
-            logger.error(f"Failed to load driver {class_name} from {module_name}: {e}")
-            return None
+        module_names = [
+            f"backend.drivers.inverters.{clean_brand}_{clean_model}",
+            f"backend.drivers.{clean_brand}_{clean_model}"
+        ]
+        
+        for mod_name in module_names:
+            try:
+                module = importlib.import_module(mod_name)
+                driver_class = getattr(module, class_name)
+                return driver_class(transport, slave_id=slave_id)
+            except (ImportError, AttributeError):
+                continue
+                
+        logger.error(f"Failed to load driver {class_name} for brand {brand} model {model}")
+        return None
 
     def poll_project_batch(self, project_id: int, inverters: List[Any] = None) -> ProjectPollBatch:
         """Đọc dữ liệu từ tất cả Inverter của Project, gom vào một Batch object."""
         if inverters is None:
             all_invs = self.project_svc.get_inverters_by_project(project_id)
-            active_inverters = [inv for inv in all_invs if inv.is_active]
+            active_inverters = [inv for inv in all_invs if getattr(inv, "is_active", True)]
         else:
-            active_inverters = inverters
+            active_inverters = [inv for inv in inverters if getattr(inv, "is_active", True)]
         
         batch = ProjectPollBatch(project_id=project_id, timestamp=datetime.now().astimezone().isoformat())
         
+        if not active_inverters:
+            logger.info(f"[PollingService] Project ID {project_id} has 0 active inverters configured.")
+            return batch
+
         for inv in active_inverters:
+            if not getattr(inv, "is_active", True):
+                continue
             # Kiểm tra xem cổng truyền thông của inverter có đang bị quét tự động không
             is_scanning = self.project_svc.metadata_db.get_setting(f"scanning_comm_{inv.comm_id}", "false") == "true"
             if is_scanning:
-                logger.info(f"[PollingService] Inverter {inv.id} (comm_id={inv.comm_id}) is busy due to scanning. Skipping polling for this device.")
+                logger.info(f"[PollingService] Inverter {inv.id} (comm_id={inv.comm_id}) is busy due to scanning. Closing active transport & skipping polling.")
+                with self._transport_lock:
+                    if inv.comm_id in self.transports:
+                        try:
+                            self.transports[inv.comm_id].close()
+                        except Exception:
+                            pass
+                        del self.transports[inv.comm_id]
                 continue
 
             # Kiểm tra xem cổng truyền thông có được cấu hình là Master hay không
@@ -312,6 +359,13 @@ class PollingService:
                 
                 # Lưu vào CacheDB (RAM)
                 self.cache_db.upsert_inverter_ac(inv.id, project_id, clean)
+                
+                # Log rõ ràng kết quả đọc thành công để theo dõi trên console/docker
+                p_ac_val = clean.get("p_inv_w", 0.0)
+                v_a_val = clean.get("v_a", 0.0)
+                e_daily_val = clean.get("e_daily", 0.0)
+                soc_val = clean.get("bms_batt_soc", 0)
+                logger.info(f"[PollingService] Inverter ID {inv.id} (SN: {inv.serial_number}, Slave {inv.slave_id}, {inv.brand} {inv.model}) READ SUCCESS -> P_ac={p_ac_val}W, V_a={v_a_val}V, E_daily={e_daily_val}kWh, BMS SOC={soc_val}%")
 
                 # MPPT & String
                 for i in range(1, inv.mppt_count + 1):
@@ -324,6 +378,75 @@ class PollingService:
                     for s_idx in [2*i-1, 2*i]:
                         i_str = clean.get(f"string_{s_idx}_current", 0.0)
                         batch.string_data.append({"inverter_id": inv.id, "string_id": s_idx, "mppt_id": i, "i_string": i_str})
+
+                # Lưu Battery Cache vào CacheDB nếu có số liệu Pin
+                battery_data = raw_data.get("battery")
+                if isinstance(battery_data, list) and len(battery_data) > 0:
+                    self.cache_db.upsert_battery_cache(project_id, battery_data)
+                elif clean.get("bms_batt_soc") is not None or clean.get("inv_batt_u") is not None or clean.get("bms_batt_u") is not None:
+                    batt_obj = {
+                        "serial_number": f"BATT_{inv.serial_number}_{inv.slave_id}",
+                        "project_id": project_id,
+                        "inv_batt_u": clean.get("inv_batt_u", 0.0),
+                        "inv_batt_i": clean.get("inv_batt_i", 0.0),
+                        "inv_batt_p": clean.get("inv_batt_p", 0.0),
+                        "bms_batt_u": clean.get("bms_batt_u", 0.0),
+                        "bms_batt_i": clean.get("bms_batt_i", 0.0),
+                        "bms_batt_p": clean.get("bms_batt_p", 0.0),
+                        "bms_batt_soc": clean.get("bms_batt_soc", 0.0),
+                        "bms_batt_soh": clean.get("bms_batt_soh", 0.0),
+                        "batt_direction": clean.get("batt_direction", -1),
+                        "e_charge_daily": clean.get("e_charge_daily", 0.0),
+                        "e_discharge_daily": clean.get("e_discharge_daily", 0.0),
+                        "e_charge_total": clean.get("e_charge_total", 0.0),
+                        "e_discharge_total": clean.get("e_discharge_total", 0.0),
+                        "bms_min_cell_temp": clean.get("bms_min_cell_temp", 0.0),
+                        "bms_max_cell_temp": clean.get("bms_max_cell_temp", 0.0),
+                        "bms_min_cell_volt": clean.get("bms_min_cell_volt", 0.0),
+                        "bms_max_cell_volt": clean.get("bms_max_cell_volt", 0.0),
+                    }
+                    self.cache_db.upsert_battery_cache(project_id, [batt_obj])
+
+                # Lưu Load Cache vào CacheDB nếu có số liệu Phụ tải
+                load_data = raw_data.get("load")
+                if load_data and isinstance(load_data, dict):
+                    self.cache_db.upsert_load_cache(project_id, load_data)
+                elif clean.get("p_load_w") is not None or clean.get("s_backup_load") is not None:
+                    self.cache_db.upsert_load_cache(project_id, clean)
+
+                # Lưu Meter Cache vào CacheDB nếu có số liệu Công tơ / Grid
+                grid_data = raw_data.get("grid")
+                if grid_data and isinstance(grid_data, dict):
+                    meter_cache_data = {
+                        "V_a": grid_data.get("u_a", clean.get("v_a")),
+                        "V_b": grid_data.get("u_b", clean.get("v_b")),
+                        "V_c": grid_data.get("u_c", clean.get("v_c")),
+                        "I_a": grid_data.get("i_a", clean.get("i_a")),
+                        "I_b": grid_data.get("i_b", clean.get("i_b")),
+                        "I_c": grid_data.get("i_c", clean.get("i_c")),
+                        "P_total": grid_data.get("p_grid_total", clean.get("p_grid_w", 0.0)),
+                        "Q_total": grid_data.get("q_grid_total", clean.get("q_grid_w", 0.0)),
+                        "S_total": grid_data.get("s_grid_total", 0.0),
+                        "PF": grid_data.get("pf", clean.get("pf")),
+                        "F": grid_data.get("f", clean.get("grid_hz")),
+                        "imp_pt_today": grid_data.get("e_import_today", grid_data.get("e_import_total", 0.0)),
+                        "exp_pt_today": grid_data.get("e_export_today", grid_data.get("e_export_total", 0.0)),
+                        "e_pt_import": grid_data.get("e_import_total", 0.0),
+                        "e_pt_export": grid_data.get("e_export_total", 0.0),
+                    }
+                    self.cache_db.upsert_meter_cache(meter_id=inv.id, project_id=project_id, data=meter_cache_data)
+                elif clean.get("p_grid_w") is not None:
+                    meter_cache_data = {
+                        "V_a": clean.get("v_a"), "V_b": clean.get("v_b"), "V_c": clean.get("v_c"),
+                        "I_a": clean.get("i_a"), "I_b": clean.get("i_b"), "I_c": clean.get("i_c"),
+                        "P_total": clean.get("p_grid_w", 0.0),
+                        "Q_total": clean.get("q_grid_w", 0.0),
+                        "PF": clean.get("pf"),
+                        "F": clean.get("grid_hz"),
+                        "imp_pt_today": clean.get("e_grid_import_daily", 0.0),
+                        "exp_pt_today": clean.get("e_grid_export_daily", 0.0),
+                    }
+                    self.cache_db.upsert_meter_cache(meter_id=inv.id, project_id=project_id, data=meter_cache_data)
 
                 # Error Logic
                 status_code = raw_data.get("state_id", 0)
@@ -444,7 +567,17 @@ class PollingService:
             except Exception as e:
                 logger.error(f"Critical error polling inverter {inv.id}: {e}", exc_info=True)
         
-        logger.info(f"Project {project_id}: Polled {len(batch.ac_data)} inverters in this batch.")
+        # Giải phóng socket TCP sau mỗi chu kỳ đọc để tránh chiếm giữ port 502 dài hạn
+        with self._transport_lock:
+            for comm_id, transport in list(self.transports.items()):
+                if hasattr(transport, "close"):
+                    try:
+                        transport.close()
+                    except Exception:
+                        pass
+            self.transports.clear()
+        
+        logger.debug(f"Project {project_id}: Polled {len(batch.ac_data)} inverters in this batch.")
         return batch
 
     def poll_meters(self, project_id: int, meters: List[Any]):
@@ -478,7 +611,7 @@ class PollingService:
 
                 # Lưu vào CacheDB
                 self.cache_db.upsert_meter_cache(m.id, project_id, raw_data)
-                logger.info(f"Poll & Cache Success - Meter {m.id}")
+                logger.debug(f"Poll & Cache Success - Meter {m.id}")
 
             except Exception as e:
                 logger.error(f"Error polling meter {m.id}: {e}")
@@ -545,20 +678,26 @@ class PollingService:
         if not brand or not model:
             return None
         
-        # Mapping: brand_model.py (Acrel_DTSD1352 -> acrel_dtsd1352.py)
-        clean_brand = brand.lower().replace(" ", "_").replace("-", "_")
-        clean_model = model.lower().replace(" ", "_").replace("-", "_")
-        module_name = f"backend.drivers.{clean_brand}_{clean_model}"
+        clean_brand = brand.lower().replace(" ", "_").replace("-", "_").replace(".", "_")
+        clean_model = model.lower().replace(" ", "_").replace("-", "_").replace(".", "_")
         
-        clean_model_class = model.lower().replace(" ", "").replace("-", "").replace("_", "")
+        clean_model_class = model.lower().replace(" ", "").replace("-", "").replace("_", "").replace(".", "")
         class_name = f"Meter{brand.capitalize()}{clean_model_class}"
         
-        try:
-            module = importlib.import_module(module_name)
-            driver_class = getattr(module, class_name)
-            return driver_class(transport, slave_id=slave_id)
-        except (ImportError, AttributeError):
-            # Fallback về Base class nếu chưa có driver cụ thể (dùng cho testing)
-            logger.warning(f"Meter driver {class_name} not found, using MeterDriverBase")
-            from backend.drivers.meter_base import MeterDriverBase
-            return MeterDriverBase(transport, slave_id=slave_id)
+        module_names = [
+            f"backend.drivers.meters.{clean_brand}_{clean_model}",
+            f"backend.drivers.{clean_brand}_{clean_model}"
+        ]
+        
+        for mod_name in module_names:
+            try:
+                module = importlib.import_module(mod_name)
+                driver_class = getattr(module, class_name)
+                return driver_class(transport, slave_id=slave_id)
+            except (ImportError, AttributeError):
+                continue
+
+        # Fallback về Base class nếu chưa có driver cụ thể
+        logger.warning(f"Meter driver {class_name} not found, using MeterDriverBase")
+        from backend.drivers.meters.meter_base import MeterDriverBase
+        return MeterDriverBase(transport, slave_id=slave_id)

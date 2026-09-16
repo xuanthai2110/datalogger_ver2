@@ -116,3 +116,44 @@ async def sync_delete_inverter(
         raise HTTPException(status_code=502, detail="Cloud server rejected the delete request.")
     
     return {"ok": True, "message": "Inverter delete request sent successfully."}
+
+@router.post("/battery/{battery_id}")
+async def sync_battery(
+    battery_id: int, 
+    background_tasks: BackgroundTasks,
+    svc: SetupService = Depends(get_setup_service)
+):
+
+    request_id = svc.initiate_battery_sync(battery_id)
+    
+    if request_id == -99:
+        return {"ok": False, "message": "Yêu cầu trước đó vẫn đang chờ phê duyệt. Vui lòng gọi đến 0836684169 để xử lý!"}
+    
+    if request_id == -2:
+        return {"ok": False, "message": "Vui lòng tạo yêu cầu đồng bộ cho Dự án (Project) trước khi đồng bộ Battery!"}
+    
+    if request_id == -1:
+        return {"ok": True, "message": "Dữ liệu Battery local đã khớp hoàn toàn với Server. Không cần cập nhật."}
+    
+    if not request_id:
+        raise HTTPException(status_code=502, detail="Cloud server rejected the battery request.")
+    
+    background_tasks.add_task(svc.background_poll_battery_status, request_id, battery_id)
+    
+    return {
+        "ok": True, 
+        "server_request_id": request_id, 
+        "message": "Battery sync request sent."
+    }
+
+@router.post("/battery/{battery_id}/delete")
+async def sync_delete_battery(
+    battery_id: int, 
+    svc: SetupService = Depends(get_setup_service)
+):
+
+    success = svc.request_delete_battery_sync(battery_id)
+    if not success:
+        raise HTTPException(status_code=502, detail="Cloud server rejected the delete request.")
+    
+    return {"ok": True, "message": "Battery delete request sent successfully."}

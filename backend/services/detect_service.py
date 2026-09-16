@@ -92,6 +92,7 @@ HUAWEI_MODEL= [
   { "model": "SUN2000-17KTL-M3", "type_code": "437", "mppt": 4, "string_mppt": "2", "p_dc": 25.5, "p_ac": 17.0 },
   { "model": "SUN2000-20KTL-M3", "type_code": "438", "mppt": 4, "string_mppt": "2", "p_dc": 30.0, "p_ac": 20.0 },
   { "model": "SUN2000-33KTL-NH", "type_code": "468", "mppt": 3, "string_mppt": "2", "p_dc": 42.9, "p_ac": 33.0 },
+  { "model": "SUN2000-50KTL", "type_code": "30,50,449", "mppt": 4, "string_mppt": "2", "p_dc": 65.0, "p_ac": 50.0 },
   { "model": "SUN2000-50KTL-M0", "type_code": "50", "mppt": 6, "string_mppt": "2", "p_dc": 65.0, "p_ac": 50.0 },
   { "model": "SUN2000-60KTL-M0", "type_code": "55", "mppt": 6, "string_mppt": "2", "p_dc": 78.0, "p_ac": 60.0 },
   { "model": "SUN2000-100KTL-M1", "type_code": "142", "mppt": 10, "string_mppt": "2", "p_dc": 150.0, "p_ac": 100.0 },
@@ -200,3 +201,8 @@ HUAWEI_MODEL= [
   { "model": "SUN2000-50KTL-JPM1", "type_code": "59", "mppt": 6, "string_mppt": "2", "p_dc": 75.0, "p_ac": 50.0 },
   { "model": "SUN2000-63KTL-JPH0", "type_code": "76", "mppt": 6, "string_mppt": "2", "p_dc": 75.6, "p_ac": 63.0 }
 ]
+
+SOLIS_MODEL = [
+  { "model": "S6-EH3P99.9K10-NV-YD-H", "type_code": "5322,0x5322", "mppt": 10, "string_mppt": "2", "p_dc": 120.0, "p_ac": 99.9 },
+  { "model": "110K", "type_code": "110,0x0110", "mppt": 10, "string_mppt": "2", "p_dc": 120.0, "p_ac": 110.0 }
+]

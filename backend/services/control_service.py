@@ -11,8 +11,9 @@ logger = logging.getLogger(__name__)
 
 
 class ControlService:
-    def __init__(self, polling_service):
+    def __init__(self, polling_service, metadata_db: Optional[Any] = None):
         self.polling_service = polling_service
+        self._metadata_db = metadata_db
         self.post_control_readback_delay_sec = 10.0
         self._project_maxp_lock = threading.Lock()
         self._project_maxp_stop_events: Dict[int, threading.Event] = {}
@@ -21,6 +22,16 @@ class ControlService:
         self._evn_lock = threading.Lock()
         self._evn_p_locked: set = set()  # {project_id} đang bị EVN giới hạn P
         self._evn_q_locked: set = set()  # {project_id} đang bị EVN giới hạn Q
+
+    @property
+    def metadata_db(self):
+        if self._metadata_db is not None:
+            return self._metadata_db
+        if hasattr(self.polling_service, "project_svc") and hasattr(self.polling_service.project_svc, "metadata_db"):
+            return self.polling_service.project_svc.metadata_db
+        if hasattr(self.polling_service, "metadata_db"):
+            return self.polling_service.metadata_db
+        return None
 
     def _find_project_item(self, schedule_project_id: int):
         for force_refresh in (False, True):
@@ -186,6 +197,8 @@ class ControlService:
         schedule_id: int,
         *,
         do_post_log: bool = False,
+        is_audit: bool = False,
+        control_source: Optional[str] = None,
     ) -> Tuple[bool, Optional[str]]:
         transport = self.polling_service._get_transport(getattr(inv, "comm_id", None))
         driver = self.polling_service._get_driver(inv.brand, transport, inv.slave_id, getattr(inv, "model", None))
@@ -193,6 +206,26 @@ class ControlService:
         if not driver:
             logger.error(f"[ControlService] No driver resolved for inverter {inv.id} ({inv.brand}).")
             return False, None
+
+        # Xác định các trường Audit Log trước
+        if not control_source:
+            if schedule_id == -1:
+                control_source = "EVN"
+            elif schedule_id in (-9000, -9001):
+                control_source = "ZERO_EXPORT"
+            elif schedule_id > 0:
+                control_source = "SCHEDULE"
+            else:
+                control_source = "MANUAL"
+
+        command_type = "UNKNOWN"
+        requested_value = 0.0
+        if mode == "MAXP" and limit_watts is not None:
+            command_type = "ACTIVE_POWER_KW"
+            requested_value = float(limit_watts) / 1000.0
+        elif mode in ("PERCENT", "LIMIT_PERCENT") and limit_percent is not None:
+            command_type = "ACTIVE_POWER_PERCENT"
+            requested_value = float(limit_percent)
 
         try:
             with transport.arbiter.operation("control"):
@@ -218,19 +251,36 @@ class ControlService:
                         command_ok = bool(driver.set_power_w(float(limit_watts)))
 
                     if not method_name:
-                        logger.error(
-                            "[ControlService] Driver %s does not support MAXP control for Inv ID %s",
-                            driver.__class__.__name__,
-                            inv.id,
-                        )
+                        err_msg = f"Driver {driver.__class__.__name__} does not support MAXP control"
+                        logger.error(f"[ControlService] {err_msg} for Inv ID {inv.id}")
+                        if is_audit and self.metadata_db:
+                            self.metadata_db.write_control_audit_log(
+                                project_id=getattr(inv, "project_id", 0),
+                                inverter_id=inv.id,
+                                command_type=command_type,
+                                control_source=control_source,
+                                requested_value=requested_value,
+                                actual_value=None,
+                                status="FAILED",
+                                error_message=err_msg
+                            )
                         return False, None
                     if not command_ok:
-                        logger.error(
-                            "[ControlService] Driver %s failed MAXP control for Inv ID %s",
-                            driver.__class__.__name__,
-                            inv.id,
-                        )
+                        err_msg = f"Driver {driver.__class__.__name__} failed MAXP control"
+                        logger.error(f"[ControlService] {err_msg} for Inv ID {inv.id}")
+                        if is_audit and self.metadata_db:
+                            self.metadata_db.write_control_audit_log(
+                                project_id=getattr(inv, "project_id", 0),
+                                inverter_id=inv.id,
+                                command_type=command_type,
+                                control_source=control_source,
+                                requested_value=requested_value,
+                                actual_value=None,
+                                status="FAILED",
+                                error_message=err_msg
+                            )
                         return False, None
+                    
                     logger.info(
                         "[ControlService] Set %.1fW cho Inv ID %s via %s (schedule %s)",
                         limit_watts,
@@ -238,6 +288,30 @@ class ControlService:
                         method_name,
                         schedule_id,
                     )
+                    
+                    # Đọc ngược lại giá trị kiểm chứng cho Audit Log
+                    actual_val = None
+                    if is_audit and hasattr(driver, "read_power_limit_percent"):
+                        try:
+                            time.sleep(0.1)
+                            actual_pct = driver.read_power_limit_percent()
+                            info = driver.read_info()
+                            capacity_kw = info.get("capacity_kw", 110.0) or 110.0
+                            actual_val = (actual_pct / 100.0) * capacity_kw
+                        except Exception as read_err:
+                            logger.warning(f"[ControlService] Readback failed for audit: {read_err}")
+
+                    if is_audit and self.metadata_db:
+                        self.metadata_db.write_control_audit_log(
+                            project_id=getattr(inv, "project_id", 0),
+                            inverter_id=inv.id,
+                            command_type=command_type,
+                            control_source=control_source,
+                            requested_value=requested_value,
+                            actual_value=actual_val,
+                            status="SUCCESS"
+                        )
+
                     if do_post_log:
                         self._schedule_post_control_power_log(inv, schedule_id)
                     return True, method_name
@@ -261,19 +335,36 @@ class ControlService:
                         command_ok = enable_ok and bool(driver.write_power_limit_percent(pct))
 
                     if not method_name:
-                        logger.error(
-                            "[ControlService] Driver %s does not support PERCENT for Inv ID %s",
-                            driver.__class__.__name__,
-                            inv.id,
-                        )
+                        err_msg = f"Driver {driver.__class__.__name__} does not support PERCENT control"
+                        logger.error(f"[ControlService] {err_msg} for Inv ID {inv.id}")
+                        if is_audit and self.metadata_db:
+                            self.metadata_db.write_control_audit_log(
+                                project_id=getattr(inv, "project_id", 0),
+                                inverter_id=inv.id,
+                                command_type=command_type,
+                                control_source=control_source,
+                                requested_value=requested_value,
+                                actual_value=None,
+                                status="FAILED",
+                                error_message=err_msg
+                            )
                         return False, None
                     if not command_ok:
-                        logger.error(
-                            "[ControlService] Driver %s failed PERCENT for Inv ID %s",
-                            driver.__class__.__name__,
-                            inv.id,
-                        )
+                        err_msg = f"Driver {driver.__class__.__name__} failed PERCENT control"
+                        logger.error(f"[ControlService] {err_msg} for Inv ID {inv.id}")
+                        if is_audit and self.metadata_db:
+                            self.metadata_db.write_control_audit_log(
+                                project_id=getattr(inv, "project_id", 0),
+                                inverter_id=inv.id,
+                                command_type=command_type,
+                                control_source=control_source,
+                                requested_value=requested_value,
+                                actual_value=None,
+                                status="FAILED",
+                                error_message=err_msg
+                            )
                         return False, None
+                    
                     logger.info(
                         "[ControlService] Set %s%% cho Inv ID %s via %s (schedule %s)",
                         pct,
@@ -281,6 +372,27 @@ class ControlService:
                         method_name,
                         schedule_id,
                     )
+
+                    # Đọc ngược lại giá trị kiểm chứng cho Audit Log
+                    actual_val = None
+                    if is_audit and hasattr(driver, "read_power_limit_percent"):
+                        try:
+                            time.sleep(0.1)
+                            actual_val = driver.read_power_limit_percent()
+                        except Exception as read_err:
+                            logger.warning(f"[ControlService] Readback failed for audit: {read_err}")
+
+                    if is_audit and self.metadata_db:
+                        self.metadata_db.write_control_audit_log(
+                            project_id=getattr(inv, "project_id", 0),
+                            inverter_id=inv.id,
+                            command_type=command_type,
+                            control_source=control_source,
+                            requested_value=requested_value,
+                            actual_value=actual_val,
+                            status="SUCCESS"
+                        )
+
                     if do_post_log:
                         self._schedule_post_control_power_log(inv, schedule_id)
                     return True, method_name
@@ -293,7 +405,19 @@ class ControlService:
                 )
                 return False, None
         except Exception as e:
-            logger.error(f"[ControlService] Modbus write fail on Inv {inv.id}: {e}")
+            err_msg = f"Modbus write fail on Inv {inv.id}: {e}"
+            logger.error(f"[ControlService] {err_msg}")
+            if is_audit and self.metadata_db:
+                self.metadata_db.write_control_audit_log(
+                    project_id=getattr(inv, "project_id", 0),
+                    inverter_id=inv.id,
+                    command_type=command_type,
+                    control_source=control_source,
+                    requested_value=requested_value,
+                    actual_value=None,
+                    status="FAILED",
+                    error_message=err_msg
+                )
             return False, None
 
     def _write_maxp_setpoints_kw(
@@ -301,6 +425,8 @@ class ControlService:
         inverters: List[Any],
         setpoints_kw: Dict[int, float],
         schedule_id: int,
+        *,
+        is_audit: bool = False,
     ) -> bool:
         ok_all = True
         for inv in inverters:
@@ -313,6 +439,7 @@ class ControlService:
                 None,
                 schedule_id,
                 do_post_log=False,
+                is_audit=is_audit,
             )
             if not ok:
                 ok_all = False
@@ -425,7 +552,7 @@ class ControlService:
                     power_map.get(inv.id),
                     sp.get(inv.id, 0.0),
                 )
-            if not self._write_maxp_setpoints_kw(inverters, sp, schedule.id):
+            if not self._write_maxp_setpoints_kw(inverters, sp, schedule.id, is_audit=True):
                 return False
             self._start_project_maxp_loop(
                 schedule.id,
@@ -445,6 +572,7 @@ class ControlService:
                     pct,
                     schedule.id,
                     do_post_log=True,
+                    is_audit=True,
                 )
                 if not ok:
                     success = False
@@ -463,7 +591,12 @@ class ControlService:
         inverters = self._active_inverters(project_item)
         if not inverters:
             return False
-        return self._reset_inverters(inverters)
+        
+        control_source = "SCHEDULE"
+        if schedule.id == -1:
+            control_source = "EVN"
+            
+        return self._reset_inverters(inverters, control_source=control_source)
 
     def _read_inverter_power(self, driver):
         if hasattr(driver, "read_power"):
@@ -528,6 +661,7 @@ class ControlService:
                     None,
                     schedule.id,
                     do_post_log=True,
+                    is_audit=True,
                 )
                 if not ok:
                     success = False
@@ -539,6 +673,7 @@ class ControlService:
                     schedule.limit_percent,
                     schedule.id,
                     do_post_log=True,
+                    is_audit=True,
                 )
                 if not ok:
                     success = False
@@ -552,7 +687,7 @@ class ControlService:
                 success = False
         return success
 
-    def _reset_inverters(self, target_inverters) -> bool:
+    def _reset_inverters(self, target_inverters, control_source: str = "SCHEDULE") -> bool:
         success = True
         for inv in target_inverters:
             transport = self.polling_service._get_transport(getattr(inv, "comm_id", None))
@@ -562,44 +697,91 @@ class ControlService:
                 success = False
                 continue
 
-            try:
-                with transport.arbiter.operation("control"):
-                    method_name = None
-                    command_ok = False
+            inv_success = False
+            actual_percent = None
+            for attempt in range(1, 11): # Thử lại tối đa 10 lần
+                try:
+                    with transport.arbiter.operation("control"):
+                        method_name = None
+                        command_ok = False
 
-                    if hasattr(driver, "control_percent"):
-                        method_name = "control_percent"
-                        command_ok = bool(driver.control_percent(100.0))
-                    elif hasattr(driver, "set_power_percent"):
-                        method_name = "set_power_percent"
-                        command_ok = bool(driver.set_power_percent(100.0))
-                    elif hasattr(driver, "write_power_limit_percent"):
-                        method_name = "write_power_limit_percent"
-                        enable_ok = True
-                        if hasattr(driver, "enable_power_limit"):
-                            enable_ok = bool(driver.enable_power_limit(True))
-                        command_ok = enable_ok and bool(driver.write_power_limit_percent(100.0))
+                        if hasattr(driver, "control_percent"):
+                            method_name = "control_percent"
+                            command_ok = bool(driver.control_percent(100.0))
+                        elif hasattr(driver, "set_power_percent"):
+                            method_name = "set_power_percent"
+                            command_ok = bool(driver.set_power_percent(100.0))
+                        elif hasattr(driver, "write_power_limit_percent"):
+                            method_name = "write_power_limit_percent"
+                            enable_ok = True
+                            if hasattr(driver, "enable_power_limit"):
+                                enable_ok = bool(driver.enable_power_limit(True))
+                            command_ok = enable_ok and bool(driver.write_power_limit_percent(100.0))
 
-                    if not method_name:
-                        logger.error(
-                            "[ControlService] Driver %s does not support reset by percent for Inv ID %s",
-                            driver.__class__.__name__,
-                            inv.id,
-                        )
-                        success = False
-                        continue
-                    if not command_ok:
-                        logger.error(
-                            "[ControlService] Driver %s failed reset by percent for Inv ID %s",
-                            driver.__class__.__name__,
-                            inv.id,
-                        )
-                        success = False
-                        continue
-                logger.info(f"[ControlService] Reset to 100 percent limit cho Inv ID {inv.id} via {method_name}")
-            except Exception as e:
-                logger.error(f"[ControlService] Reset Modbus fail limit Inv {inv.id}: {e}")
+                        if not method_name:
+                            logger.error(
+                                "[ControlService] Driver %s does not support reset by percent for Inv ID %s",
+                                driver.__class__.__name__,
+                                inv.id,
+                            )
+                            break
+
+                        if not command_ok:
+                            logger.warning(
+                                "[ControlService] Attempt %d/10: Driver %s failed to write 100%% limit for Inv ID %s. Retrying...",
+                                attempt, driver.__class__.__name__, inv.id
+                            )
+                            time.sleep(0.5)
+                            continue
+
+                        # Đợi 0.5s trước khi đọc lại để inverter cập nhật thanh ghi
+                        time.sleep(0.5)
+
+                        # Đọc lại để kiểm chứng
+                        if hasattr(driver, "read_power_limit_percent"):
+                            actual_percent = driver.read_power_limit_percent()
+                            # Chấp nhận sai số nhỏ (ví dụ >= 99.0%)
+                            if actual_percent >= 99.0:
+                                logger.info(
+                                    "[ControlService] Attempt %d/10: Confirmed Inv ID %s limit is successfully reset to 100.0%% (Read-back: %.1f%%)",
+                                    attempt, inv.id, actual_percent
+                                )
+                                inv_success = True
+                                break
+                            else:
+                                logger.warning(
+                                    "[ControlService] Attempt %d/10: Inv ID %s reset command sent but read-back value is %.1f%%. Retrying...",
+                                    attempt, inv.id, actual_percent
+                                )
+                        else:
+                            # Fallback nếu driver không có method
+                            logger.info(f"[ControlService] Reset command sent successfully for Inv ID {inv.id} via {method_name} (Readback check skipped)")
+                            inv_success = True
+                            break
+
+                except Exception as e:
+                    logger.warning(
+                        "[ControlService] Attempt %d/10: Reset Modbus fail limit Inv %s: %s. Retrying...",
+                        attempt, inv.id, e
+                    )
+                    time.sleep(0.5)
+
+            if not inv_success:
+                logger.error(f"[ControlService] ERROR: Failed to reset and verify 100%% limit for Inv ID {inv.id} after 10 attempts.")
                 success = False
+
+            # Ghi nhận lịch sử Reset 100% vào Audit Log
+            if self.metadata_db:
+                self.metadata_db.write_control_audit_log(
+                    project_id=getattr(inv, "project_id", 0),
+                    inverter_id=inv.id,
+                    command_type="RESET_100",
+                    control_source=control_source,
+                    requested_value=100.0,
+                    actual_value=actual_percent if inv_success else None,
+                    status="SUCCESS" if inv_success else "FAILED",
+                    error_message=None if inv_success else "Failed to reset and verify 100% after 10 attempts"
+                )
 
         return success
 
@@ -692,7 +874,7 @@ class ControlService:
                     )
                     return False
 
-                return self._reset_inverters(target_inverters)
+                return self._reset_inverters(target_inverters, control_source="SCHEDULE")
             else:
                 logger.warning(f"[ControlService] Unsupported scope for reset: {schedule.scope}")
                 return False

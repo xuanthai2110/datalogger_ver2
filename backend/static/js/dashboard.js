@@ -4,6 +4,11 @@ async function loadDashboard() {
     document.getElementById('total-p-ac').innerText = d.total_p_ac.toFixed(2);
     document.getElementById('total-e-daily').innerText = d.total_e_daily.toFixed(1);
     document.getElementById('total-revenue').innerText = d.total_revenue.toLocaleString();
+
+    if (d.power_flow) {
+        renderPowerFlow(d.power_flow);
+    }
+
     document.getElementById('projects-body').innerHTML = d.projects.map((p, i) => `
         <tr class="clickable" onclick="loadProjectDetail(${p.id})">
             <td>${i+1}</td><td>${p.name}</td><td>${p.inverter_count} Div</td>
@@ -12,6 +17,103 @@ async function loadDashboard() {
             <td><span class="status-badge ${p.status==='online'?'badge-online':'badge-offline'}">${p.status}</span></td>
         </tr>
     `).join('');
+}
+
+function renderPowerFlow(pf) {
+    if (!pf) return;
+
+    const pvKw = (pf.pv_kw || 0).toFixed(1);
+    const pvDcKw = (pf.pv_dc_kw || 0).toFixed(1);
+    const invKw = (pf.inverter_kw || 0).toFixed(1);
+    const gridKw = (pf.grid_kw || 0).toFixed(1);
+    const gridLoadKw = (pf.grid_load_kw || 0).toFixed(1);
+    const battKw = (pf.battery_kw || 0).toFixed(1);
+    const backupKw = (pf.backup_load_kw || 0).toFixed(1);
+    const soc = pf.battery_soc !== undefined ? pf.battery_soc : 100;
+
+    const elPv = document.getElementById('pf-val-pv');
+    const elInv = document.getElementById('pf-val-inverter');
+    const elGrid = document.getElementById('pf-val-grid');
+    const elGridLoad = document.getElementById('pf-val-grid-load');
+    const elBatt = document.getElementById('pf-val-battery');
+    const elBackup = document.getElementById('pf-val-backup');
+    const elSocPill = document.getElementById('pf-soc-val');
+    const elLastUpdate = document.getElementById('pf-last-update');
+
+    if (elPv) elPv.innerText = `${pvKw}kW`;
+    if (elInv) elInv.innerText = `${invKw}kW`;
+    if (elGrid) elGrid.innerText = `${gridKw}kW`;
+    if (elGridLoad) elGridLoad.innerText = `${gridLoadKw}kW`;
+    if (elBatt) elBatt.innerText = `${battKw}kW`;
+    if (elBackup) elBackup.innerText = `${backupKw}kW`;
+    if (elSocPill) elSocPill.innerText = soc;
+    if (elLastUpdate) elLastUpdate.innerText = pf.updated_at || new Date().toLocaleString('vi-VN');
+
+    // Extended Daily Metrics & DC Power
+    const setTxt = (id, val, def='0.0') => {
+        const el = document.getElementById(id);
+        if (el) el.innerText = (val !== undefined && val !== null) ? val : def;
+    };
+
+    setTxt('pf-daily-pv', pf.pv_daily_kwh);
+    setTxt('pf-dc-pv', pvDcKw);
+    setTxt('pf-inv-count', `x${pf.inverter_count || 1}`);
+    setTxt('pf-daily-grid-imp', pf.grid_import_daily_kwh);
+    setTxt('pf-daily-grid-exp', pf.grid_export_daily_kwh);
+    setTxt('pf-daily-grid-load', pf.grid_load_daily_kwh);
+    setTxt('pf-batt-count', `x${pf.battery_count || 1}`);
+    setTxt('pf-daily-batt-charge', pf.battery_charge_daily_kwh);
+    setTxt('pf-daily-batt-discharge', pf.battery_discharge_daily_kwh);
+    setTxt('pf-daily-backup-load', pf.backup_load_daily_kwh);
+
+    // Helper to control Dual-Layer SVG paths (Base Line + Moving Flow Line)
+    const setLineState = (baseId, flowId, active, dirClass='pf-line-forward') => {
+        const basePath = document.getElementById(baseId);
+        const flowPath = document.getElementById(flowId);
+
+        if (basePath) {
+            if (active) basePath.classList.remove('pf-disabled');
+            else basePath.classList.add('pf-disabled');
+        }
+
+        if (flowPath) {
+            flowPath.classList.remove('pf-disabled', 'pf-line-forward', 'pf-line-reverse');
+            if (active) {
+                flowPath.classList.add(dirClass);
+            } else {
+                flowPath.classList.add('pf-disabled');
+            }
+        }
+    };
+
+    // 1. PV Path (PV -> Inverter)
+    setLineState('path-pv-base', 'path-pv-flow', parseFloat(pvKw) > 0.01, 'pf-line-forward');
+
+    // 2. Grid Path (Export: Inverter -> Grid, Import: Grid -> Inverter)
+    const gridDir = pf.grid_direction || (parseFloat(gridKw) > 0.01 ? 'export' : 'none');
+    if (gridDir === 'export') {
+        setLineState('path-grid-base', 'path-grid-flow', true, 'pf-line-forward');
+    } else if (gridDir === 'import') {
+        setLineState('path-grid-base', 'path-grid-flow', true, 'pf-line-reverse');
+    } else {
+        setLineState('path-grid-base', 'path-grid-flow', false);
+    }
+
+    // 3. Grid Load Path (Inverter -> Grid Load)
+    setLineState('path-grid-load-base', 'path-grid-load-flow', parseFloat(gridLoadKw) > 0.01, 'pf-line-forward');
+
+    // 4. Battery Path (0: Charging -> Inverter to Battery, 1: Discharging -> Battery to Inverter)
+    const battDir = pf.battery_direction;
+    if (battDir === 0) {
+        setLineState('path-batt-base', 'path-batt-flow', true, 'pf-line-reverse'); // Inverter -> Pin (Sạc)
+    } else if (battDir === 1) {
+        setLineState('path-batt-base', 'path-batt-flow', true, 'pf-line-forward'); // Pin -> Inverter (Xả)
+    } else {
+        setLineState('path-batt-base', 'path-batt-flow', parseFloat(battKw) > 0.01, 'pf-line-forward');
+    }
+
+    // 5. Backup Load Path (Inverter -> Backup Load)
+    setLineState('path-backup-base', 'path-backup-flow', parseFloat(backupKw) > 0.01, 'pf-line-forward');
 }
 
 async function loadProjectDetail(id) {

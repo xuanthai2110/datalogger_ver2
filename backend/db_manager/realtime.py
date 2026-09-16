@@ -9,7 +9,10 @@ from backend.models.realtime import (
     InverterACRealtimeCreate, InverterACRealtimeResponse,
     InverterErrorCreate, InverterErrorResponse,
     mpptRealtimeCreate, mpptRealtimeResponse,
-    stringRealtimeCreate, stringRealtimeResponse
+    stringRealtimeCreate, stringRealtimeResponse,
+    BatteryRealtimeCreate, BatteryRealtimeResponse,
+    LoadRealtimeCreate, LoadRealtimeResponse,
+    MeterRealtimeCreate, MeterRealtimeResponse
 )
 from backend.models.schedule import (
     ControlScheduleCreate, ControlScheduleUpdate, ControlScheduleResponse
@@ -20,8 +23,11 @@ class RealtimeDB(BaseDB):
     
     def _connect(self):
         conn = super()._connect()
-        conn.execute("PRAGMA journal_mode=WAL;")
-        conn.execute("PRAGMA synchronous=NORMAL;")
+        try:
+            conn.execute("PRAGMA synchronous=NORMAL;")
+            conn.execute("PRAGMA cache_size = -2000;")  # Tận dụng 2MB RAM cache để hạn chế tối đa I/O đọc đĩa
+        except Exception:
+            pass
         return conn
 
     def _create_tables(self):
@@ -74,6 +80,46 @@ class RealtimeDB(BaseDB):
             # MPPT & String Realtime tables
             cursor.execute("CREATE TABLE IF NOT EXISTS mppt_realtime (id INTEGER PRIMARY KEY AUTOINCREMENT, project_id INTEGER, inverter_id INTEGER, mppt_index INTEGER, string_on_mppt INTEGER, V_mppt REAL, I_mppt REAL, P_mppt REAL, Max_I REAL, Max_V REAL, Max_P REAL, created_at TEXT);")
             cursor.execute("CREATE TABLE IF NOT EXISTS string_realtime (id INTEGER PRIMARY KEY AUTOINCREMENT, project_id INTEGER, inverter_id INTEGER, mppt_id INTEGER, string_id INTEGER, I_string REAL, max_I REAL, created_at TEXT);")
+
+            # Battery Realtime table
+            cursor.execute("""
+            CREATE TABLE IF NOT EXISTS battery_realtime (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                project_id INTEGER, inverter_id INTEGER, battery_id INTEGER, serial_number TEXT,
+                inv_batt_u REAL, inv_batt_i REAL, inv_batt_p REAL,
+                bms_batt_u REAL, bms_batt_i REAL, bms_batt_p REAL,
+                bms_batt_soc REAL, bms_batt_soh REAL, batt_direction INTEGER,
+                e_charge_daily REAL, e_discharge_daily REAL, e_charge_total REAL, e_discharge_total REAL,
+                bms_min_cell_temp REAL, bms_max_cell_temp REAL, bms_min_cell_volt REAL, bms_max_cell_volt REAL,
+                created_at TEXT
+            );
+            """)
+
+            # Load Realtime table
+            cursor.execute("""
+            CREATE TABLE IF NOT EXISTS load_realtime (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                project_id INTEGER, inverter_id INTEGER,
+                p_load REAL, s_backup_load REAL,
+                u_backup_a REAL, u_backup_b REAL, u_backup_c REAL,
+                i_backup_a REAL, i_backup_b REAL, i_backup_c REAL,
+                p_backup_a REAL, p_backup_b REAL, p_backup_c REAL,
+                e_daily REAL, e_total REAL, e_backup_daily REAL, e_backup_total REAL,
+                created_at TEXT
+            );
+            """)
+
+            # Meter Realtime table
+            cursor.execute("""
+            CREATE TABLE IF NOT EXISTS meter_realtime (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                project_id INTEGER, meter_id INTEGER, serial_number TEXT,
+                u_a REAL, u_b REAL, u_c REAL, i_a REAL, i_b REAL, i_c REAL,
+                p_a REAL, p_b REAL, p_c REAL, P_total REAL, Q_total REAL, S_total REAL,
+                PF REAL, f REAL, imp_pt_today REAL, exp_pt_today REAL, imp_pt_total REAL, exp_pt_total REAL,
+                created_at TEXT
+            );
+            """)
 
             # Control Schedules
             cursor.execute("""
@@ -137,6 +183,76 @@ class RealtimeDB(BaseDB):
                 conn.execute("ALTER TABLE inverter_ac_realtime ADD COLUMN delta_E_monthly REAL DEFAULT 0")
                 if "denta_E_monthly" in cols_ac:
                     conn.execute("UPDATE inverter_ac_realtime SET delta_E_monthly = denta_E_monthly")
+
+            # --- Indexes ---
+            # Mục đích: tăng tốc độ tất cả query SELECT trên các bảng lớn.
+            # CREATE INDEX IF NOT EXISTS là idempotent — an toàn khi chạy nhiều lần.
+            # Nếu DB đang bị lock (hiếm), bỏ qua và log cảnh báo — không crash service.
+            try:
+                # inverter_ac_realtime — bảng lớn nhất, cần 2 index
+                # Phục vụ: get_latest_inverter_ac_realtime(), get_inverter_ac_range(),
+                #          energy_service.py raw SQL (SUM delta_E_monthly WHERE inverter_id + created_at)
+                cursor.execute("""
+                    CREATE INDEX IF NOT EXISTS idx_inv_ac_inv_time
+                    ON inverter_ac_realtime(inverter_id, created_at DESC)
+                """)
+                # Phục vụ: get_latest_ac_batch(), get_yesterday_energy_by_project()
+                cursor.execute("""
+                    CREATE INDEX IF NOT EXISTS idx_inv_ac_proj_time
+                    ON inverter_ac_realtime(project_id, created_at DESC)
+                """)
+
+                # project_realtime — phục vụ dashboard và chart lịch sử
+                # Phục vụ: get_latest_project_realtime(), get_project_realtime_range()
+                cursor.execute("""
+                    CREATE INDEX IF NOT EXISTS idx_proj_rt_proj_time
+                    ON project_realtime(project_id, created_at DESC)
+                """)
+
+                # inverter_errors — phục vụ trang lịch sử lỗi
+                # Phục vụ: get_inverter_errors()
+                cursor.execute("""
+                    CREATE INDEX IF NOT EXISTS idx_inv_err_inv_time
+                    ON inverter_errors(inverter_id, created_at DESC)
+                """)
+
+                # mppt_realtime — bảng lớn (N_inverter × N_mppt × 288/ngày)
+                # Phục vụ: get_latest_mppt_batch(), max_tracking_service seed
+                cursor.execute("""
+                    CREATE INDEX IF NOT EXISTS idx_mppt_rt_inv_idx
+                    ON mppt_realtime(inverter_id, mppt_index)
+                """)
+
+                # string_realtime — phục vụ trang chi tiết string
+                # Phục vụ: get_latest_string_batch(), max_tracking_service seed
+                cursor.execute("""
+                    CREATE INDEX IF NOT EXISTS idx_str_rt_inv_sid
+                    ON string_realtime(inverter_id, string_id)
+                """)
+
+                # battery_realtime
+                cursor.execute("""
+                    CREATE INDEX IF NOT EXISTS idx_batt_rt_proj_time
+                    ON battery_realtime(project_id, created_at DESC)
+                """)
+
+                # load_realtime
+                cursor.execute("""
+                    CREATE INDEX IF NOT EXISTS idx_load_rt_proj_time
+                    ON load_realtime(project_id, created_at DESC)
+                """)
+
+                # meter_realtime
+                cursor.execute("""
+                    CREATE INDEX IF NOT EXISTS idx_meter_rt_proj_time
+                    ON meter_realtime(project_id, created_at DESC)
+                """)
+
+            except Exception as idx_err:
+                import logging as _logging
+                _logging.getLogger(__name__).warning(
+                    f"RealtimeDB: Could not create indexes (non-critical, will retry on next startup): {idx_err}"
+                )
 
 
     # --- Outbox API ---
@@ -421,9 +537,12 @@ class RealtimeDB(BaseDB):
             conn.execute("DELETE FROM control_schedules WHERE inverter_id=?", (inverter_id,))
 
     def delete_project_data(self, project_id: int):
-        """Xóa dữ liệu cấp độ project (outbox, realtime summary, schedules)."""
+        """Xóa dữ liệu cấp độ project (outbox, realtime summary, schedules, battery, load, meter)."""
         with self._connect() as conn:
             conn.execute("DELETE FROM project_realtime WHERE project_id=?", (project_id,))
+            conn.execute("DELETE FROM battery_realtime WHERE project_id=?", (project_id,))
+            conn.execute("DELETE FROM load_realtime WHERE project_id=?", (project_id,))
+            conn.execute("DELETE FROM meter_realtime WHERE project_id=?", (project_id,))
             conn.execute("DELETE FROM uploader_outbox WHERE project_id=?", (project_id,))
             conn.execute("DELETE FROM control_schedules WHERE project_id=?", (project_id,))
 
@@ -444,8 +563,116 @@ class RealtimeDB(BaseDB):
             "inverter_ac_realtime", 
             "inverter_errors", 
             "mppt_realtime", 
-            "string_realtime"
+            "string_realtime",
+            "battery_realtime",
+            "load_realtime",
+            "meter_realtime"
         ]
+
+    # --- Battery Realtime API ---
+    def post_battery_batch(self, records: List[BatteryRealtimeCreate]):
+        if not records: return
+        values = [(
+            r.project_id, r.inverter_id, r.battery_id, r.serial_number,
+            r.inv_batt_u, r.inv_batt_i, r.inv_batt_p,
+            r.bms_batt_u, r.bms_batt_i, r.bms_batt_p,
+            r.bms_batt_soc, r.bms_batt_soh, r.batt_direction,
+            r.e_charge_daily, r.e_discharge_daily, r.e_charge_total, r.e_discharge_total,
+            r.bms_min_cell_temp, r.bms_max_cell_temp, r.bms_min_cell_volt, r.bms_max_cell_volt,
+            r.created_at
+        ) for r in records]
+        with self._connect() as conn:
+            conn.executemany("""
+                INSERT INTO battery_realtime (
+                    project_id, inverter_id, battery_id, serial_number,
+                    inv_batt_u, inv_batt_i, inv_batt_p,
+                    bms_batt_u, bms_batt_i, bms_batt_p,
+                    bms_batt_soc, bms_batt_soh, batt_direction,
+                    e_charge_daily, e_discharge_daily, e_charge_total, e_discharge_total,
+                    bms_min_cell_temp, bms_max_cell_temp, bms_min_cell_volt, bms_max_cell_volt,
+                    created_at
+                ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+            """, values)
+
+    def get_latest_battery_batch(self, project_id: int) -> List[BatteryRealtimeResponse]:
+        with self._connect() as conn:
+            rows = conn.execute("""
+                SELECT * FROM battery_realtime
+                WHERE id IN (
+                    SELECT MAX(id) FROM battery_realtime
+                    WHERE project_id = ?
+                    GROUP BY COALESCE(battery_id, inverter_id, 0)
+                )
+            """, (project_id,)).fetchall()
+            return [to_dataclass(BatteryRealtimeResponse, r) for r in rows]
+
+    # --- Load Realtime API ---
+    def post_load_batch(self, records: List[LoadRealtimeCreate]):
+        if not records: return
+        values = [(
+            r.project_id, r.inverter_id, r.p_load, r.s_backup_load,
+            r.u_backup_a, r.u_backup_b, r.u_backup_c,
+            r.i_backup_a, r.i_backup_b, r.i_backup_c,
+            r.p_backup_a, r.p_backup_b, r.p_backup_c,
+            r.e_daily, r.e_total, r.e_backup_daily, r.e_backup_total,
+            r.created_at
+        ) for r in records]
+        with self._connect() as conn:
+            conn.executemany("""
+                INSERT INTO load_realtime (
+                    project_id, inverter_id, p_load, s_backup_load,
+                    u_backup_a, u_backup_b, u_backup_c,
+                    i_backup_a, i_backup_b, i_backup_c,
+                    p_backup_a, p_backup_b, p_backup_c,
+                    e_daily, e_total, e_backup_daily, e_backup_total,
+                    created_at
+                ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+            """, values)
+
+    def get_latest_load_batch(self, project_id: int) -> List[LoadRealtimeResponse]:
+        with self._connect() as conn:
+            rows = conn.execute("""
+                SELECT * FROM load_realtime
+                WHERE id IN (
+                    SELECT MAX(id) FROM load_realtime
+                    WHERE project_id = ?
+                    GROUP BY COALESCE(inverter_id, 0)
+                )
+            """, (project_id,)).fetchall()
+            return [to_dataclass(LoadRealtimeResponse, r) for r in rows]
+
+    # --- Meter (Grid) Realtime API ---
+    def post_meter_batch(self, records: List[MeterRealtimeCreate]):
+        if not records: return
+        values = [(
+            r.project_id, r.meter_id, r.serial_number,
+            r.u_a, r.u_b, r.u_c, r.i_a, r.i_b, r.i_c,
+            r.p_a, r.p_b, r.p_c, r.P_total, r.Q_total, r.S_total,
+            r.PF, r.f, r.imp_pt_today, r.exp_pt_today, r.imp_pt_total, r.exp_pt_total,
+            r.created_at
+        ) for r in records]
+        with self._connect() as conn:
+            conn.executemany("""
+                INSERT INTO meter_realtime (
+                    project_id, meter_id, serial_number,
+                    u_a, u_b, u_c, i_a, i_b, i_c,
+                    p_a, p_b, p_c, P_total, Q_total, S_total,
+                    PF, f, imp_pt_today, exp_pt_today, imp_pt_total, exp_pt_total,
+                    created_at
+                ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+            """, values)
+
+    def get_latest_meter_batch(self, project_id: int) -> List[MeterRealtimeResponse]:
+        with self._connect() as conn:
+            rows = conn.execute("""
+                SELECT * FROM meter_realtime
+                WHERE id IN (
+                    SELECT MAX(id) FROM meter_realtime
+                    WHERE project_id = ?
+                    GROUP BY COALESCE(meter_id, 0)
+                )
+            """, (project_id,)).fetchall()
+            return [to_dataclass(MeterRealtimeResponse, r) for r in rows]
         
         try:
             with self._connect() as conn:
@@ -455,9 +682,7 @@ class RealtimeDB(BaseDB):
                     total_deleted += cursor.rowcount
                 
                 if total_deleted > 0:
-                    logger.info(f"RealtimeDB: Deleted {total_deleted} old records. Running VACUUM...")
-                    conn.execute("VACUUM")
-                    logger.info("RealtimeDB: VACUUM completed.")
+                    logger.info(f"RealtimeDB: Deleted {total_deleted} old records successfully.")
                 else:
                     logger.info("RealtimeDB: No old records found to purge.")
         except Exception as e:

@@ -14,11 +14,10 @@ from backend.services.project_service import ProjectService
 from backend.workers.evn_worker import EVNWorker
 from backend.core import settings
 
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-)
+from backend.core.logger import setup_logging
+setup_logging()
 logger = logging.getLogger("EVNLauncher")
+
 
 def main():
     try:

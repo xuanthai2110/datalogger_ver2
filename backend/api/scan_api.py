@@ -83,21 +83,24 @@ def normalize_type_code(tc):
 @router.get("/models")
 def get_models():
     try:
-        from backend.services.detect_service import SUNGROW_MODEL, HUAWEI_MODEL
+        from backend.services.detect_service import SUNGROW_MODEL, HUAWEI_MODEL, SOLIS_MODEL
         drivers_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "drivers")
         existing_files = set(os.listdir(drivers_dir))
 
         valid_sungrow = [m["model"] for m in SUNGROW_MODEL if _get_driver_filename("Sungrow", m["model"]) in existing_files]
         valid_huawei = [m["model"] for m in HUAWEI_MODEL if _get_driver_filename("Huawei", m["model"]) in existing_files]
+        valid_solis = [m["model"] for m in SOLIS_MODEL]
 
         return {
             "Sungrow": sorted(list(set(valid_sungrow))),
             "Huawei": sorted(list(set(valid_huawei))),
-            "GoodWe": ["GW80KMT"]
+            "GoodWe": ["GW80KMT"],
+            "Solis": sorted(list(set(valid_solis)))
         }
     except Exception as e:
         logger.error(f"[scan/models] Error: {e}")
-        return {"Sungrow": [], "Huawei": [], "GoodWe": []}
+        return {"Sungrow": [], "Huawei": [], "GoodWe": [], "Solis": []}
+
 
 # Global state for scanning
 class ScanState:
@@ -253,37 +256,64 @@ def save_meters(body: dict = Body(...)):
 
 def _get_driver_class(driver_name: str, brand: str = None, model: str = None):
     if brand and model:
-        # Dynamic import: e.g. sungrow_sg110cx.py -> Sungrowsg110cx
+        if brand.lower() == "solis":
+            if "s6" in model.lower() or "eh3p99" in model.lower():
+                from backend.drivers.inverters.solis_S6_EH3P99_9K10_NV_YD_H import SolisS6HybridDriver
+                return SolisS6HybridDriver
+            elif "110k" in model.lower():
+                from backend.drivers.inverters.solis_110k import Solis110k
+                return Solis110k
+            elif "100k" in model.lower():
+                from backend.drivers.inverters.solis_100k import Solis100k
+                return Solis100k
+        # Dynamic import: try subfolder inverters first
         clean_model_mod = model.lower().replace("-", "_").replace(".", "_")
-        module_name = f"backend.drivers.{brand.lower()}_{clean_model_mod}"
         clean_model_class = model.replace("-", "").replace(".", "").lower()
         class_name = f"{brand.capitalize()}{clean_model_class}"
-        try:
-            module = importlib.import_module(module_name)
-            return getattr(module, class_name)
-        except Exception as e:
-            logger.error(f"Cannot load dynamic driver {module_name}.{class_name}: {e}")
-            # Fallback will raise error below if we can't load it
-            raise ValueError(f"Driver logic class not found for {brand} {model}")
+        
+        module_names = [
+            f"backend.drivers.inverters.{brand.lower()}_{clean_model_mod}",
+            f"backend.drivers.{brand.lower()}_{clean_model_mod}"
+        ]
+        for module_name in module_names:
+            try:
+                module = importlib.import_module(module_name)
+                return getattr(module, class_name)
+            except Exception:
+                continue
+
+        logger.error(f"Cannot load dynamic driver class {class_name} for {brand} {model}")
+        raise ValueError(f"Driver logic class not found for {brand} {model}")
 
     # Fallback to old behavior
     if driver_name == "Huawei":
-        from backend.drivers.huawei_sun2000_110ktl import Huaweisun2000110ktl
+        from backend.drivers.inverters.huawei_sun2000_110ktl import Huaweisun2000110ktl
         return Huaweisun2000110ktl
     elif driver_name == "Sungrow":
-        from backend.drivers.sungrow_sg110cx import Sungrowsg110cx
+        from backend.drivers.inverters.sungrow_sg110cx import Sungrowsg110cx
         return Sungrowsg110cx
+    elif driver_name == "Solis":
+        from backend.drivers.inverters.solis_S6_EH3P99_9K10_NV_YD_H import SolisS6HybridDriver
+        return SolisS6HybridDriver
     raise ValueError(f"Unknown driver: {driver_name}")
 
 def _get_transport(comm: dict):
     if comm["comm_type"] == "TCP":
         from backend.communication.modbus_tcp import ModbusTCP
-        t = ModbusTCP(
-            host=comm["host"], 
-            port=comm.get("port", 502),
-            timeout=comm.get("timeout", 1.0)
-        )
-        t.connect()
+        host = comm["host"]
+        port = int(comm.get("port", 502))
+        timeout = float(comm.get("timeout", 2.5))
+        
+        t = ModbusTCP(host=host, port=port, timeout=timeout)
+        connected = False
+        for attempt in range(2):
+            if t.connect():
+                connected = True
+                break
+            time.sleep(0.5)
+            
+        if not connected:
+            raise ConnectionError(f"Không thể kết nối đến Modbus TCP {host}:{port} sau 2 lần thử. Vui lòng kiểm tra địa chỉ IP/Port hoặc thiết bị bận.")
         return t
     else:
         from backend.communication.modbus_rtu import ModbusRTU
@@ -295,7 +325,8 @@ def _get_transport(comm: dict):
             stopbits=comm.get("stopbits", 1),
             timeout=comm.get("timeout", 1.0),
         )
-        t.connect()
+        if not t.connect():
+            raise ConnectionError(f"Không thể mở cổng COM RS485 {comm.get('com_port')}.")
         return t
 
 def background_scan(comm: dict):
@@ -320,13 +351,16 @@ def background_scan(comm: dict):
     detect_info = None
     if brand_selected and model_selected:
         try:
-            from backend.services.detect_service import SUNGROW_MODEL, HUAWEI_MODEL
+            from backend.services.detect_service import SUNGROW_MODEL, HUAWEI_MODEL, SOLIS_MODEL
             if brand_selected.lower() == "sungrow":
                 detect_info = next((m for m in SUNGROW_MODEL if m["model"] == model_selected), None)
             elif brand_selected.lower() == "huawei":
                 detect_info = next((m for m in HUAWEI_MODEL if m["model"] == model_selected), None)
+            elif brand_selected.lower() == "solis":
+                detect_info = next((m for m in SOLIS_MODEL if m["model"] == model_selected), None)
         except Exception as e:
             logger.error(f"Error loading models from detect_service: {e}")
+
 
     with scan_state.lock:
         scan_state.is_running = True
@@ -531,4 +565,69 @@ def get_setup_status():
                 all_inverters.append(d)
         return {"projects": [asdict(p) for p in all_projects], "inverters": all_inverters}
     except Exception as e:
+        return JSONResponse(status_code=500, content={"ok": False, "error": str(e)})
+
+@router.post("/batteries")
+def scan_batteries_api(
+    body: dict = Body(..., example={
+        "project_id": 1,
+        "driver": "PylontechBMS",
+        "comm_type": "TCP",
+        "host": "192.168.1.100",
+        "port": 502,
+        "slave_id_start": 1,
+        "slave_id_end": 10
+    }),
+    setup_svc: SetupService = Depends(get_setup_service)
+):
+    """Quét Pin trực tiếp từ BMS qua RS485/TCP"""
+    try:
+        project_id = body.get("project_id")
+        if not project_id:
+            return JSONResponse(status_code=400, content={"ok": False, "error": "Missing project_id"})
+            
+        driver_name = body.get("driver", "PylontechBMS")
+        slave_start = int(body.get("slave_id_start", 1))
+        slave_end = int(body.get("slave_id_end", 10))
+
+        if "pylontech" in driver_name.lower():
+            from backend.drivers.batteries.pylontech_bms import PylontechBMSDriver as DriverClass
+        else:
+            from backend.drivers.batteries.pylontech_bms import PylontechBMSDriver as DriverClass
+
+        comm_type = body.get("comm_type", "TCP").upper()
+        if comm_type == "TCP":
+            host = body.get("host", "127.0.0.1")
+            port = int(body.get("port", 502))
+            try:
+                from pymodbus.client import ModbusTcpClient
+                transport = ModbusTcpClient(host=host, port=port, timeout=1)
+                transport.connect()
+            except Exception as conn_err:
+                logger.error(f"[scan_batteries] TCP connect error: {conn_err}")
+                return JSONResponse(status_code=500, content={"ok": False, "error": str(conn_err)})
+        else:
+            com_port = body.get("com_port", "/dev/ttyUSB0")
+            baudrate = int(body.get("baudrate", 9600))
+            try:
+                from pymodbus.client import ModbusSerialClient
+                transport = ModbusSerialClient(port=com_port, baudrate=baudrate, timeout=1)
+                transport.connect()
+            except Exception as conn_err:
+                logger.error(f"[scan_batteries] Serial connect error: {conn_err}")
+                return JSONResponse(status_code=500, content={"ok": False, "error": str(conn_err)})
+
+        found_ids = setup_svc.scan_batteries(
+            transport=transport,
+            project_id=project_id,
+            driver_class=DriverClass,
+            slave_start=slave_start,
+            slave_end=slave_end
+        )
+        try: transport.close()
+        except: pass
+
+        return {"ok": True, "found_count": len(found_ids), "battery_ids": found_ids}
+    except Exception as e:
+        logger.error(f"[scan_batteries] Error: {e}", exc_info=True)
         return JSONResponse(status_code=500, content={"ok": False, "error": str(e)})

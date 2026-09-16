@@ -71,6 +71,49 @@ class SetupService:
         logger.info(f"[Setup] Scan complete. Found {len(found_ids)} inverters.")
         return found_ids
 
+    def scan_batteries(self, transport, project_id: int, driver_class, slave_start: int = 1, slave_end: int = 30) -> list[int]:
+        """
+        QUY TRÌNH QUÉT BATTERY (BMS DIRECT SCAN):
+        1. Lặp qua dải Slave ID (slave_start -> slave_end).
+        2. Với mỗi Slave ID, dùng BMS driver thử đọc thông tin phần cứng (`read_info`).
+        3. Nếu BMS phản hồi (`is_active` & `serial_number`), gán `project_id`.
+        4. Lưu thông tin vào Database local (`upsert_battery`).
+        """
+        from backend.models.battery import BatteryCreate
+        from dataclasses import fields
+        found_ids = []
+        logger.info(f"[Setup] Starting scan for batteries (Slave {slave_start}-{slave_end}) using {driver_class.__name__}")
+        
+        for slave_id in range(slave_start, slave_end + 1):
+            success = False
+            for attempt in range(2):
+                try:
+                    driver = driver_class(transport, slave_id=slave_id)
+                    info = driver.read_info()
+                    
+                    if info and info.get("serial_number"):
+                        logger.info(f"[Setup] Found active battery at Slave ID {slave_id}: {info['serial_number']} ({info.get('brand')} {info.get('model')})")
+                        info["project_id"] = project_id
+                        info["battery_index"] = len(found_ids) + 1
+                        
+                        valid_fields = {f.name for f in fields(BatteryCreate)}
+                        filtered = {k: v for k, v in info.items() if k in valid_fields}
+                        
+                        batt_res = self.project_svc.upsert_battery(BatteryCreate(**filtered))
+                        found_ids.append(batt_res.id)
+                        success = True
+                        break
+                    else:
+                        logger.debug(f"[Setup] No battery response at Slave ID {slave_id} (Attempt {attempt+1})")
+                except Exception as e:
+                    logger.debug(f"[Setup] Error scanning Battery Slave ID {slave_id} (Attempt {attempt+1}): {e}")
+                
+                if not success and attempt == 0:
+                    time.sleep(0.5)
+                    
+        logger.info(f"[Setup] Battery scan complete. Found {len(found_ids)} batteries.")
+        return found_ids
+
     def _get_token_for_project(self, project_id: int) -> tuple[Optional[str], Optional[int]]:
         """Lấy token và account_id cho project."""
         project = self.project_svc.get_project(project_id)
@@ -639,6 +682,221 @@ class SetupService:
                 return False
         except Exception as e:
             logger.error(f"[Sync] Inverter delete sync error: {e}")
+            return False
+
+    # =========================================================
+    # BATTERY SYNC METHODS
+    # =========================================================
+
+    def initiate_battery_sync(self, battery_id: int) -> Optional[int]:
+        """Gửi yêu cầu đồng bộ Battery (POST /api/batteries/requests/)"""
+        battery = self.project_svc.get_battery_by_id(battery_id)
+        if not battery or not battery.project_id: return None
+        
+        project_id = battery.project_id
+        token, account_id = self._get_token_for_project(project_id)
+        if not token: return None
+
+        sync_info = self.project_svc.metadata_db.get_project_sync_info(project_id)
+        if not sync_info: return None
+
+        # Danh sách các trường Battery theo yêu cầu server
+        batt_fields = {
+            'battery_index', 'serial_number', 'brand', 'model',
+            'capacity_kwh', 'capacity_ah', 'num_parallel_connections',
+            'cells_per_module', 'modules_in_series', 'is_active',
+            'replaced_by_id', 'usage_start_at', 'usage_end_at'
+        }
+        payload = {k: v for k, v in asdict(battery).items() if k in batt_fields}
+        
+        # Thêm các ID liên kết (Chỉ chọn 1 trong 2 theo yêu cầu server)
+        server_id = sync_info.get("server_id")
+        server_req_id = sync_info.get("server_request_id")
+        
+        if server_id:
+            payload["project_id"] = server_id
+        elif server_req_id:
+            payload["project_request_id"] = server_req_id
+        else:
+            logger.warning(f"[Sync] Project {project_id} has neither server_id nor server_request_id. Battery sync will fail.")
+            return -2
+        
+        if payload.get("usage_start_at") is None:
+            payload["usage_start_at"] = datetime.now(timezone.utc).isoformat()
+
+        try:
+            base_api = API_BASE_URL.rstrip('/')
+            url = f"{base_api}/api/batteries/requests/"
+            headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
+            
+            # 0. Nếu battery ĐÃ ĐƯỢC DUYỆT hoặc BỊ TỪ CHỐI, ta gửi Request Update
+            if battery.server_id and battery.sync_status in ['approved', 'rejected']:
+                check_url = f"{base_api}/api/batteries/{battery.server_id}"
+                get_resp = requests.get(check_url, headers=headers, timeout=10)
+                if get_resp.status_code == 401:
+                    token = self.auth.handle_unauthorized(account_id)
+                    if token:
+                        headers["Authorization"] = f"Bearer {token}"
+                        get_resp = requests.get(check_url, headers=headers, timeout=10)
+                        
+                if get_resp.status_code == 200:
+                    server_data = get_resp.json()
+                    has_changes = False
+                    for k, v in payload.items():
+                        if k in ["project_id", "project_request_id"]:
+                            continue
+                        if not self._is_equal(server_data.get(k), v):
+                            has_changes = True
+                            break
+                            
+                    if not has_changes:
+                        logger.info(f"[Sync] Battery {battery_id} has no changes. Skipping update request.")
+                        return -1
+                
+                update_payload = payload.copy()
+                update_payload.pop("project_id", None)
+                update_payload.pop("project_request_id", None)
+                
+                update_url = f"{base_api}/api/batteries/requests/update/{battery.server_id}"
+                logger.info(f"[Sync] Sending Battery Update Request to {update_url}: {update_payload}")
+                resp = requests.post(update_url, json=update_payload, headers=headers, timeout=20)
+                
+                if resp.status_code == 401:
+                    token = self.auth.handle_unauthorized(account_id)
+                    if token:
+                        headers["Authorization"] = f"Bearer {token}"
+                        resp = requests.post(update_url, json=update_payload, headers=headers, timeout=20)
+                
+                if resp.status_code in [200, 201]:
+                    new_req_id = resp.json().get("id")
+                    if new_req_id:
+                        self.project_svc.update_battery_sync(battery_id, server_request_id=new_req_id, status='pending')
+                        logger.info(f"[Sync] Battery update request created: {new_req_id}")
+                        return new_req_id
+                
+                logger.warning(f"[Sync] Battery Update Request failed: {resp.status_code} - {resp.text}")
+                return None
+
+            # 1. Nếu đang ở trạng thái pending
+            if battery.server_request_id and battery.sync_status == 'pending':
+                req_url = f"{base_api}/api/batteries/requests/{battery.server_request_id}"
+                check_resp = requests.get(req_url, headers=headers, timeout=10)
+                
+                if check_resp.status_code == 401:
+                    token = self.auth.handle_unauthorized(account_id)
+                    if token:
+                        headers["Authorization"] = f"Bearer {token}"
+                        check_resp = requests.get(req_url, headers=headers, timeout=10)
+                        
+                if check_resp.status_code == 200:
+                    server_data = check_resp.json()
+                    status = server_data.get("status", "").lower()
+                    
+                    if status == "pending":
+                        logger.info(f"[Sync] Battery request {battery.server_request_id} is still pending.")
+                        return -99
+                    elif status == "approved":
+                        server_id = server_data.get("approved_battery_id") or server_data.get("target_battery_id")
+                        self.project_svc.update_battery_sync(battery_id, server_id=server_id, status='approved')
+                        logger.info(f"[Sync] Battery request {battery.server_request_id} already approved.")
+                        return self.initiate_battery_sync(battery_id)
+                    elif status == "rejected":
+                        logger.info(f"[Sync] Battery request {battery.server_request_id} was rejected. Allowing re-submission.")
+                        self.project_svc.update_battery_sync(battery_id, server_request_id=0, status='rejected')
+                        return self.initiate_battery_sync(battery_id)
+
+            # 2. Tạo mới bằng POST nếu chưa có
+            logger.info(f"[Sync] Sending Battery Create Request to {url}: {payload}")
+            resp = requests.post(url, json=payload, headers=headers, timeout=20)
+            
+            if resp.status_code == 401:
+                token = self.auth.handle_unauthorized(account_id)
+                if token:
+                    headers["Authorization"] = f"Bearer {token}"
+                    resp = requests.post(url, json=payload, headers=headers, timeout=20)
+                    
+            if resp.status_code in [200, 201, 202]:
+                res_data = resp.json()
+                request_id = res_data.get("id")
+                if request_id:
+                    self.project_svc.update_battery_sync(battery_id, server_request_id=request_id, status='pending')
+                    return request_id
+            else:
+                logger.warning(f"[Sync] Battery sync failed with status {resp.status_code}: {resp.text}")
+        except Exception as e:
+            logger.error(f"[Sync] Battery sync error: {e}")
+        
+        return None
+
+    def background_poll_battery_status(self, request_id: int, battery_id: int):
+        """Theo dõi trạng thái phê duyệt từ Admin cho Battery."""
+        poll_key = f"batt_{request_id}"
+        if poll_key in _ACTIVE_POLLS:
+            return
+            
+        _ACTIVE_POLLS.add(poll_key)
+        try:
+            for _ in range(120):
+                battery = self.project_svc.get_battery_by_id(battery_id)
+                if not battery or not battery.project_id: break
+                token, _ = self._get_token_for_project(battery.project_id)
+                if not token:
+                    time.sleep(60)
+                    continue
+
+                try:
+                    url = f"{API_BASE_URL.rstrip('/')}/api/batteries/requests/{request_id}"
+                    headers = {"Authorization": f"Bearer {token}"}
+                    resp = requests.get(url, headers=headers, timeout=10)
+                    
+                    if resp.status_code == 200:
+                        data = resp.json()
+                        status = data.get("status", "").lower()
+                        
+                        if status == "approved":
+                            s_id = data.get("approved_battery_id") or data.get("target_battery_id")
+                            self.project_svc.update_battery_sync(battery_id, server_id=s_id, status='approved')
+                            logger.info(f"[Sync] Battery {battery_id} APPROVED by Admin.")
+                            break
+                        elif status == "rejected":
+                            self.project_svc.update_battery_sync(battery_id, status='rejected')
+                            break
+                except Exception as e:
+                    logger.error(f"[Sync] Polling battery error: {e}")
+                
+                time.sleep(60)
+        finally:
+            _ACTIVE_POLLS.discard(poll_key)
+
+    def request_delete_battery_sync(self, battery_id: int) -> bool:
+        """Gửi yêu cầu xoá Battery lên server (POST /api/batteries/requests/delete/{server_id})"""
+        battery = self.project_svc.get_battery_by_id(battery_id)
+        if not battery or not battery.server_id:
+            return True
+
+        token, account_id = self._get_token_for_project(battery.project_id)
+        if not token: return False
+
+        try:
+            base_api = API_BASE_URL.rstrip('/')
+            url = f"{base_api}/api/batteries/requests/delete/{battery.server_id}"
+            headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
+            
+            resp = requests.post(url, headers=headers, timeout=20)
+            if resp.status_code == 401:
+                token = self.auth.handle_unauthorized(account_id)
+                if token:
+                    headers["Authorization"] = f"Bearer {token}"
+                    resp = requests.post(url, headers=headers, timeout=20)
+            
+            if resp.status_code in [200, 201, 202, 204]:
+                logger.info(f"[Sync] Sent delete request for battery {battery_id} (Server ID {battery.server_id})")
+                return True
+            else:
+                logger.warning(f"[Sync] Battery delete request failed: {resp.status_code} - {resp.text}")
+                return False
+        except Exception as e:
+            logger.error(f"[Sync] Battery delete sync error: {e}")
             return False
 
     def cancel_sync(self, project_id: int) -> bool:

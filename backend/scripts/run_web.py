@@ -5,16 +5,15 @@ Truy cập: http://<raspberry-pi-ip>:8080
 """
 import sys
 from pathlib import Path
+
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 
 import uvicorn
 import logging
 
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
-)
+from backend.core.logger import setup_logging
+setup_logging()
 
 from backend.core import settings
 

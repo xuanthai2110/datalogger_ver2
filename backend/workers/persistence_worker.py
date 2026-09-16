@@ -6,7 +6,8 @@ from backend.services.energy_service import EnergyService
 from backend.services.telemetry_service import TelemetryService
 from backend.models.realtime import (
     InverterACRealtimeCreate, mpptRealtimeCreate, 
-    stringRealtimeCreate, ProjectRealtimeCreate
+    stringRealtimeCreate, ProjectRealtimeCreate,
+    BatteryRealtimeCreate, LoadRealtimeCreate, MeterRealtimeCreate
 )
 from backend.core import settings
 
@@ -64,9 +65,12 @@ class PersistenceWorker(threading.Thread):
             ac_rows = self.cache_db.get_all_ac_cache()
             mppt_rows = self.cache_db.get_all_mppt_cache()
             string_rows = self.cache_db.get_all_string_cache()
+            battery_rows = self.cache_db.get_all_battery_cache()
+            load_rows = self.cache_db.get_all_load_cache()
+            meter_rows = self.cache_db.get_all_meter_cache()
         
-        if not ac_rows:
-            logger.info("Persistence Worker: No AC data in cache. Skipping snapshot.")
+        if not ac_rows and not battery_rows and not load_rows and not meter_rows:
+            logger.info("Persistence Worker: No telemetry data in cache. Skipping snapshot.")
             return
 
         project_inverter_ids = {}
@@ -175,7 +179,96 @@ class PersistenceWorker(threading.Thread):
                 created_at=item.get("updated_at", "")
             ))
 
-        # 5. Final Persist to RealtimeDB
+        # 5. Process Battery
+        battery_records = []
+        for item in battery_rows:
+            proj_id = item.get("project_id", 1)
+            if proj_id in sleep_projects:
+                continue
+            battery_records.append(BatteryRealtimeCreate(
+                project_id=proj_id,
+                inverter_id=item.get("inverter_id"),
+                battery_id=item.get("battery_id"),
+                serial_number=item.get("serial_number", ""),
+                inv_batt_u=_num(item.get("inv_batt_u")),
+                inv_batt_i=_num(item.get("inv_batt_i")),
+                inv_batt_p=_num(item.get("inv_batt_p")),
+                bms_batt_u=_num(item.get("bms_batt_u")),
+                bms_batt_i=_num(item.get("bms_batt_i")),
+                bms_batt_p=_num(item.get("bms_batt_p")),
+                bms_batt_soc=_num(item.get("bms_batt_soc")),
+                bms_batt_soh=_num(item.get("bms_batt_soh")),
+                batt_direction=item.get("batt_direction", -1),
+                e_charge_daily=_num(item.get("e_charge_daily")),
+                e_discharge_daily=_num(item.get("e_discharge_daily")),
+                e_charge_total=_num(item.get("e_charge_total")),
+                e_discharge_total=_num(item.get("e_discharge_total")),
+                bms_min_cell_temp=_num(item.get("bms_min_cell_temp")),
+                bms_max_cell_temp=_num(item.get("bms_max_cell_temp")),
+                bms_min_cell_volt=_num(item.get("bms_min_cell_volt")),
+                bms_max_cell_volt=_num(item.get("bms_max_cell_volt")),
+                created_at=item.get("updated_at", "")
+            ))
+
+        # 6. Process Load
+        load_records = []
+        for item in load_rows:
+            proj_id = item.get("project_id", 1)
+            if proj_id in sleep_projects:
+                continue
+            load_records.append(LoadRealtimeCreate(
+                project_id=proj_id,
+                inverter_id=item.get("inverter_id"),
+                p_load=_num(item.get("p_load")),
+                s_backup_load=_num(item.get("s_backup_load")),
+                u_backup_a=_num(item.get("u_backup_a")),
+                u_backup_b=_num(item.get("u_backup_b")),
+                u_backup_c=_num(item.get("u_backup_c")),
+                i_backup_a=_num(item.get("i_backup_a")),
+                i_backup_b=_num(item.get("i_backup_b")),
+                i_backup_c=_num(item.get("i_backup_c")),
+                p_backup_a=_num(item.get("p_backup_a")),
+                p_backup_b=_num(item.get("p_backup_b")),
+                p_backup_c=_num(item.get("p_backup_c")),
+                e_daily=_num(item.get("e_daily")),
+                e_total=_num(item.get("e_total")),
+                e_backup_daily=_num(item.get("e_backup_daily")),
+                e_backup_total=_num(item.get("e_backup_total")),
+                created_at=item.get("updated_at", "")
+            ))
+
+        # 7. Process Meter
+        meter_records = []
+        for item in meter_rows:
+            proj_id = item.get("project_id", 1)
+            if proj_id in sleep_projects:
+                continue
+            meter_records.append(MeterRealtimeCreate(
+                project_id=proj_id,
+                meter_id=item.get("meter_id"),
+                serial_number=str(item.get("serial_number", "")),
+                u_a=_num(item.get("V_a")),
+                u_b=_num(item.get("V_b")),
+                u_c=_num(item.get("V_c")),
+                i_a=_num(item.get("I_a")),
+                i_b=_num(item.get("I_b")),
+                i_c=_num(item.get("I_c")),
+                p_a=_num(item.get("P_a")),
+                p_b=_num(item.get("P_b")),
+                p_c=_num(item.get("P_c")),
+                P_total=_num(item.get("P_total")),
+                Q_total=_num(item.get("Q_total")),
+                S_total=_num(item.get("S_total")),
+                PF=_num(item.get("PF")),
+                f=_num(item.get("F")),
+                imp_pt_today=_num(item.get("imp_pt_today")),
+                exp_pt_today=_num(item.get("exp_pt_today")),
+                imp_pt_total=_num(item.get("e_pt_import")),
+                exp_pt_total=_num(item.get("e_pt_export")),
+                created_at=item.get("updated_at", "")
+            ))
+
+        # 8. Final Persist to RealtimeDB
         if ac_records:
             self.realtime_db.post_inverter_ac_batch(ac_records)
             logger.info(f"Persistence Worker: Saved {len(ac_records)} inverter AC records.")
@@ -187,6 +280,18 @@ class PersistenceWorker(threading.Thread):
         if string_records:
             self.realtime_db.post_string_batch(string_records)
             logger.info(f"Persistence Worker: Saved {len(string_records)} String records.")
+
+        if battery_records:
+            self.realtime_db.post_battery_batch(battery_records)
+            logger.info(f"Persistence Worker: Saved {len(battery_records)} Battery records.")
+
+        if load_records:
+            self.realtime_db.post_load_batch(load_records)
+            logger.info(f"Persistence Worker: Saved {len(load_records)} Load records.")
+
+        if meter_records:
+            self.realtime_db.post_meter_batch(meter_records)
+            logger.info(f"Persistence Worker: Saved {len(meter_records)} Meter records.")
 
         for pid, agg in project_aggs.items():
             if agg["count"] > 0:

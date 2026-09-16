@@ -16,7 +16,7 @@ services:
       - .env
     # devices:
     volumes:
-      - ./backend/db_manager/data:/app/backend/db_manager/data
+      - ./backend:/app/backend
       - /dev/shm:/dev/shm
     logging:
       driver: "json-file"
@@ -39,7 +39,7 @@ services:
       - .env
     # devices:
     volumes:
-      - ./backend/db_manager/data:/app/backend/db_manager/data
+      - ./backend:/app/backend
       - /dev/shm:/dev/shm
     logging:
       driver: "json-file"
@@ -62,7 +62,7 @@ services:
     env_file:
       - .env
     volumes:
-      - ./backend/db_manager/data:/app/backend/db_manager/data
+      - ./backend:/app/backend
       - /dev/shm:/dev/shm
     logging:
       driver: "json-file"
@@ -71,6 +71,31 @@ services:
         max-file: "3"
     depends_on:
       - web
+
+  solis_test:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: runtime
+    image: datalogger:latest
+    container_name: datalogger_solis_test
+    network_mode: "host"
+    command: ["python", "backend/tests/test_solis_hybrid_registers.py"]
+    environment:
+      - MODBUS_HOST=192.168.1.100
+      - MODBUS_PORT=502
+      - MODBUS_SLAVE=1
+      - OFFSET_MODE=40001
+      - READ_INTERVAL=5
+    env_file:
+      - .env
+    volumes:
+      - ./backend/tests:/app/backend/tests
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
 
 #   evn:
 #     build:
@@ -96,3 +121,4 @@ services:
 #     depends_on:
 #       - web
 #       - polling
+

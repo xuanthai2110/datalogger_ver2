@@ -31,7 +31,7 @@ async function loadSettings() {
         
         // --- 1. ĐIỀN DROPDOWN DỰ ÁN (ƯU TIÊN LÀM TRƯỚC) ---
         const projOptions = ['<option value="">-- Chọn dự án --</option>', ...settingsProjects.map(p => `<option value="${p.id}">${p.name}</option>`)].join('');
-        const projectDropdownIds = ['inv-mgmt-project-filter', 'meter-mgmt-project-filter', 'inv-proj-select', 'meter-proj-select', 'sync-project-select'];
+        const projectDropdownIds = ['inv-mgmt-project-filter', 'meter-mgmt-project-filter', 'inv-proj-select', 'meter-proj-select', 'sync-project-select', 'batt-scan-project-select'];
         
         projectDropdownIds.forEach(id => {
             const el = document.getElementById(id);
@@ -43,7 +43,7 @@ async function loadSettings() {
 
         // --- 2. ĐIỀN DROPDOWN TRUYỀN THÔNG ---
         const commOptions = ['<option value="">-- Chọn truyền thông --</option>', ...settingsComms.map(c => `<option value="${c.id}">${getCommLabel(c)}</option>`)].join('');
-        const commDropdownIds = ['inv-comm-select', 'meter-comm-select', 'inv-scan-comm-select'];
+        const commDropdownIds = ['inv-comm-select', 'meter-comm-select', 'inv-scan-comm-select', 'batt-scan-comm-select'];
 
         commDropdownIds.forEach(id => {
             const el = document.getElementById(id);
@@ -80,6 +80,7 @@ async function loadSettings() {
 
         renderInvertersByProject();
         renderMetersByProject();
+        loadBatteriesUI();
         renderScanResults();
         renderMeterScanResults();
         loadAvailablePorts();
@@ -128,6 +129,32 @@ async function saveInverter() {
     const rateDcVal = document.getElementById('inv-dc').value;
     const capAcVal = parseFloat(document.getElementById('inv-cap').value);
     
+    let activeEl = document.getElementById('inv-is-active') || document.getElementById('inv-status') || document.getElementById('inv-state');
+    if (!activeEl) {
+        const formInv = document.getElementById('form-inverter');
+        if (formInv) {
+            const selects = formInv.querySelectorAll('select');
+            for (let sel of selects) {
+                const text = sel.options[sel.selectedIndex]?.text || "";
+                if (text.includes("hoạt động") || text.includes("Hoạt động") || sel.value === "true" || sel.value === "false") {
+                    activeEl = sel;
+                    break;
+                }
+            }
+        }
+    }
+    
+    let isActiveVal = true;
+    if (activeEl) {
+        const valStr = String(activeEl.value).trim().toLowerCase();
+        const textStr = String(activeEl.options[activeEl.selectedIndex]?.text || "").trim().toLowerCase();
+        if (valStr === 'false' || valStr === '0' || textStr.includes('ngưng') || textStr.includes('ngung') || textStr.includes('tắt') || textStr.includes('tat') || textStr.includes('dừng')) {
+            isActiveVal = false;
+        } else {
+            isActiveVal = true;
+        }
+    }
+
     const body = {
         project_id: parseInt(document.getElementById('inv-proj-select').value),
         comm_id: parseInt(document.getElementById('inv-comm-select').value),
@@ -139,7 +166,9 @@ async function saveInverter() {
         rate_ac_kw: capAcVal,
         phase_count: parseInt(document.getElementById('inv-phase').value),
         inverter_index: invIndexVal ? parseInt(invIndexVal) : null,
-        rate_dc_kwp: rateDcVal ? parseFloat(rateDcVal) : null
+        rate_dc_kwp: rateDcVal ? parseFloat(rateDcVal) : null,
+        is_active: isActiveVal,
+        status: isActiveVal ? "Hoạt động" : "Ngưng hoạt động"
     };
 
     if (!body.project_id || !body.comm_id || !body.serial_number || isNaN(body.slave_id)) {
@@ -170,6 +199,12 @@ function editInverter(inv) {
     document.getElementById('inv-phase').value = inv.phase_count || 3;
     document.getElementById('inv-index').value = inv.inverter_index !== undefined && inv.inverter_index !== null ? inv.inverter_index : "";
     
+    const activeEl = document.getElementById('inv-is-active');
+    if (activeEl) {
+        const isAct = (inv.is_active !== false && inv.is_active !== 0 && inv.status !== "Ngưng hoạt động" && inv.status !== "INACTIVE");
+        activeEl.value = isAct ? "true" : "false";
+    }
+
     document.getElementById('form-inverter').classList.remove('hidden');
     document.getElementById('inv-sn').focus();
 }
@@ -184,6 +219,8 @@ function resetInverterForm() {
     document.getElementById('inv-dc').value = "";
     document.getElementById('inv-phase').value = 3;
     document.getElementById('inv-index').value = "";
+    const activeEl = document.getElementById('inv-is-active');
+    if (activeEl) activeEl.value = "true";
     document.getElementById('form-inverter').classList.add('hidden');
 }
 
@@ -457,7 +494,7 @@ async function deleteComm(id) {
 
 // === NEW RS-485 & TCP SETTINGS ===
 function loadCommSettings() {
-    for (let i = 1; i <= 5; i++) {
+    for (let i = 1; i <= 6; i++) {
         const c = settingsComms.find(x => x.id === i);
         if (!c) continue;
         
@@ -483,16 +520,16 @@ function loadCommSettings() {
             if (mmEl) mmEl.value = c.multi_master ? "1" : "0";
             if (roleEl) roleEl.value = c.is_master !== false ? "1" : "0";
         } else {
-            // TCP
-            const hostEl = document.getElementById(`comm-host-5`);
-            const portEl = document.getElementById(`comm-port-5`);
-            const timeoutEl = document.getElementById(`comm-timeout-5`);
-            const startEl = document.getElementById(`comm-start-5`);
-            const endEl = document.getElementById(`comm-end-5`);
-            const mmEl = document.getElementById(`comm-multimaster-5`);
-            const roleEl = document.getElementById(`comm-role-5`);
+            // TCP 1 (ID 5) & TCP 2 (ID 6)
+            const hostEl = document.getElementById(`comm-host-${i}`);
+            const portEl = document.getElementById(`comm-port-${i}`);
+            const timeoutEl = document.getElementById(`comm-timeout-${i}`);
+            const startEl = document.getElementById(`comm-start-${i}`);
+            const endEl = document.getElementById(`comm-end-${i}`);
+            const mmEl = document.getElementById(`comm-multimaster-${i}`);
+            const roleEl = document.getElementById(`comm-role-${i}`);
 
-            if (hostEl) hostEl.value = c.host || '192.168.1.10';
+            if (hostEl) hostEl.value = c.host || (i === 5 ? '192.168.1.10' : '192.168.1.11');
             if (portEl) portEl.value = c.port || 502;
             if (timeoutEl) timeoutEl.value = c.timeout || 1.0;
             if (startEl) startEl.value = c.slave_id_start || 1;
@@ -524,17 +561,22 @@ async function saveCommSettings() {
             promises.push(apiCall(`/comm/${i}`, 'PATCH', body));
         }
         
-        // TCP (ID 5)
-        const tcpBody = {
-            host: document.getElementById(`comm-host-5`).value.trim(),
-            port: parseInt(document.getElementById(`comm-port-5`).value),
-            timeout: parseFloat(document.getElementById(`comm-timeout-5`).value),
-            slave_id_start: parseInt(document.getElementById(`comm-start-5`).value),
-            slave_id_end: parseInt(document.getElementById(`comm-end-5`).value),
-            multi_master: document.getElementById(`comm-multimaster-5`).value === "1",
-            is_master: document.getElementById(`comm-role-5`).value === "1"
-        };
-        promises.push(apiCall(`/comm/5`, 'PATCH', tcpBody));
+        // TCP (ID 5 & ID 6)
+        for (let i = 5; i <= 6; i++) {
+            const hostInput = document.getElementById(`comm-host-${i}`);
+            if (hostInput) {
+                const tcpBody = {
+                    host: hostInput.value.trim(),
+                    port: parseInt(document.getElementById(`comm-port-${i}`).value),
+                    timeout: parseFloat(document.getElementById(`comm-timeout-${i}`).value),
+                    slave_id_start: parseInt(document.getElementById(`comm-start-${i}`).value),
+                    slave_id_end: parseInt(document.getElementById(`comm-end-${i}`).value),
+                    multi_master: document.getElementById(`comm-multimaster-${i}`).value === "1",
+                    is_master: document.getElementById(`comm-role-${i}`).value === "1"
+                };
+                promises.push(apiCall(`/comm/${i}`, 'PATCH', tcpBody));
+            }
+        }
         
         const results = await Promise.all(promises);
         if (results.every(r => r && !r.error)) {
@@ -572,12 +614,20 @@ async function startInverterScan() {
     let brand = "", model = "", driverName = "";
     if (selectedDriverTemplate === "huawei_sun2000_110ktl") {
         brand = "Huawei"; model = "SUN2000-110KTL"; driverName = "Huawei";
+    } else if (selectedDriverTemplate === "huawei_sun2000_60ktl") {
+        brand = "Huawei"; model = "SUN2000-60KTL"; driverName = "Huawei";
+    } else if (selectedDriverTemplate === "huawei_sun2000_50ktl") {
+        brand = "Huawei"; model = "SUN2000-50KTL"; driverName = "Huawei";
     } else if (selectedDriverTemplate === "sungrow_sg33cx") {
         brand = "Sungrow"; model = "SG33CX"; driverName = "Sungrow";
     } else if (selectedDriverTemplate === "sungrow_sg50cx") {
         brand = "Sungrow"; model = "SG50CX"; driverName = "Sungrow";
     } else if (selectedDriverTemplate === "sungrow_sg110cx") {
         brand = "Sungrow"; model = "SG110CX"; driverName = "Sungrow";
+    } else if (selectedDriverTemplate === "sungrow_sg125cxp2") {
+        brand = "Sungrow"; model = "SG125CX-P2"; driverName = "Sungrow";
+    } else if (selectedDriverTemplate === "solis_s6_eh3p99_9k10_nv_yd_h") {
+        brand = "Solis"; model = "S6-EH3P99.9K10-NV-YD-H"; driverName = "Solis";
     } else if (selectedDriverTemplate === "solis_110k") {
         brand = "Solis"; model = "110K"; driverName = "Solis";
     } else if (selectedDriverTemplate === "canadian_csi110KTL1400GL02E") {
@@ -767,7 +817,8 @@ function getCommLabel(comm) {
         if (comm.id === 2) return "RS485_1";
         if (comm.id === 3) return "RS485_2";
         if (comm.id === 4) return "RS485_3";
-        if (comm.id === 5) return "TCP";
+        if (comm.id === 5) return "TCP 1";
+        if (comm.id === 6) return "TCP 2";
         return comm.driver || 'Unknown';
     } catch (e) {
         console.error("Error in getCommLabel:", e);
@@ -1724,4 +1775,678 @@ function submitAddDevice() {
     // Add device logic
     closeAddDeviceModal();
     showToast("Device Added", "Đã thêm thiết bị thành công.");
+}
+
+// =========================================================
+// ZERO EXPORT FUNCTIONALITY
+// =========================================================
+let zeStatusInterval = null;
+
+function initZeroExportTab() {
+    console.log("Initializing Zero Export Tab...");
+    
+    // Đổ danh sách dự án vào dropdown ze-project-select
+    const projSelect = document.getElementById('ze-project-select');
+    if (projSelect) {
+        const projOptions = ['<option value="">-- Chọn dự án --</option>', ...settingsProjects.map(p => `<option value="${p.id}">${p.name}</option>`)].join('');
+        projSelect.innerHTML = projOptions;
+    }
+    
+    // Ẩn form cấu hình ban đầu
+    const form = document.getElementById('ze-config-form');
+    if (form) form.classList.add('hidden');
+    
+    if (zeStatusInterval) {
+        clearInterval(zeStatusInterval);
+        zeStatusInterval = null;
+    }
+}
+
+async function loadZeroExportConfig() {
+    const projectId = document.getElementById('ze-project-select').value;
+    const form = document.getElementById('ze-config-form');
+    
+    if (zeStatusInterval) {
+        clearInterval(zeStatusInterval);
+        zeStatusInterval = null;
+    }
+
+    if (!projectId) {
+        if (form) form.classList.add('hidden');
+        return;
+    }
+
+    try {
+        // Gọi API lấy cấu hình và trạng thái của Zero Export
+        const res = await apiCall(`/zero-export/${projectId}`);
+        if (!res) return;
+
+        const cfg = res.config;
+        const status = res.status;
+
+        // Hiển thị form
+        if (form) form.classList.remove('hidden');
+
+        // Điền các Meter của dự án vào select
+        const meterSelect = document.getElementById('ze-meter-select');
+        if (meterSelect) {
+            // Lấy tất cả meter của dự án hiện tại
+            const projectMeters = settingsMeters.filter(m => String(m.project_id) === String(projectId)) || [];
+            
+            // Nếu settingsMeters chưa load đầy đủ, gọi API
+            let meters = projectMeters;
+            if (meters.length === 0) {
+                const apiMeters = await apiCall(`/meters/project/${projectId}`);
+                meters = apiMeters || [];
+            }
+            
+            meterSelect.innerHTML = [
+                '<option value="">-- Chọn Meter --</option>',
+                ...meters.map(m => `<option value="${m.id}">${m.brand} ${m.model || ''} (ID: ${m.slave_id}, SN: ${m.serial_number || 'N/A'})</option>`)
+            ].join('');
+            
+            // Đặt giá trị đã lưu
+            meterSelect.value = cfg.meter_id || "";
+        }
+
+        // Điền cấu hình khác
+        document.getElementById('ze-meter-direction').value = cfg.meter_direction || "GRID_SIDE";
+        document.getElementById('ze-export-limit-w').value = cfg.export_limit_w !== undefined ? cfg.export_limit_w : 0;
+        document.getElementById('ze-deadband-w').value = cfg.deadband_w !== undefined ? cfg.deadband_w : 200;
+        document.getElementById('ze-gain').value = cfg.gain !== undefined ? cfg.gain : 1.0;
+        document.getElementById('ze-ramp-kw').value = cfg.ramp_kw_per_step !== undefined ? cfg.ramp_kw_per_step : 50;
+        document.getElementById('ze-fail-threshold').value = cfg.meter_fail_threshold !== undefined ? cfg.meter_fail_threshold : 10;
+
+        // Cập nhật giao diện trạng thái hoạt động
+        const badge = document.getElementById('ze-status-badge');
+        const btnEnable = document.getElementById('ze-btn-enable');
+        const btnDisable = document.getElementById('ze-btn-disable');
+
+        if (cfg.enabled) {
+            badge.innerText = "BẬT";
+            badge.style.background = "#10b981"; // green
+            btnEnable.style.display = "none";
+            btnDisable.style.display = "inline-block";
+        } else {
+            badge.innerText = "TẮT";
+            badge.style.background = "#6b7280"; // gray
+            btnEnable.style.display = "inline-block";
+            btnDisable.style.display = "none";
+        }
+
+        // Cập nhật Realtime monitors
+        updateZeroExportMonitorUI(status);
+
+        // Đăng ký lặp cập nhật trạng thái mỗi 5s
+        zeStatusInterval = setInterval(async () => {
+            const freshRes = await apiCall(`/zero-export/${projectId}`);
+            if (freshRes && freshRes.status) {
+                updateZeroExportMonitorUI(freshRes.status);
+            }
+        }, 5000);
+
+    } catch (e) {
+        console.error("loadZeroExportConfig error:", e);
+        showToast("Lỗi", "Không thể tải cấu hình Zero Export.");
+    }
+}
+
+function updateZeroExportMonitorUI(status) {
+    if (!status) return;
+
+    // P_grid (W)
+    const pGridEl = document.getElementById('ze-monitor-pgrid');
+    if (pGridEl) {
+        if (status.p_grid_w !== null && status.p_grid_w !== undefined) {
+            pGridEl.innerText = `${status.p_grid_w.toLocaleString('vi-VN')} W`;
+            pGridEl.style.color = status.p_grid_w < 0 ? "#ef4444" : "#10b981"; // đỏ nếu export (P_grid < 0)
+        } else {
+            pGridEl.innerText = "-- W";
+            pGridEl.style.color = "var(--text)";
+        }
+    }
+
+    // P_inv (W)
+    const pInvEl = document.getElementById('ze-monitor-pinv');
+    if (pInvEl) {
+        pInvEl.innerText = status.p_inv_total_w !== null ? `${status.p_inv_total_w.toLocaleString('vi-VN')} W` : "-- W";
+    }
+
+    // Setpoint limit (kW)
+    const setpointEl = document.getElementById('ze-monitor-setpoint');
+    if (setpointEl) {
+        setpointEl.innerText = status.p_inv_setpoint_w !== null ? `${(status.p_inv_setpoint_w / 1000).toFixed(2)} kW` : "-- kW";
+    }
+
+    // Hành động cuối
+    const actionEl = document.getElementById('ze-monitor-action');
+    if (actionEl) {
+        actionEl.innerText = status.last_action || "--";
+        if (status.last_action === "DECREASE") {
+            actionEl.style.color = "#ef4444"; // đỏ
+        } else if (status.last_action === "INCREASE") {
+            actionEl.style.color = "#10b981"; // xanh
+        } else if (status.last_action === "METER_FAULT") {
+            actionEl.style.color = "#f59e0b"; // cam
+        } else {
+            actionEl.style.color = "var(--text)";
+        }
+    }
+
+    // Fail count
+    const failEl = document.getElementById('ze-monitor-failcount');
+    if (failEl) {
+        failEl.innerText = status.meter_fail_count !== undefined ? status.meter_fail_count : 0;
+        failEl.style.color = status.meter_fail_count > 0 ? "#f59e0b" : "var(--text)";
+    }
+
+    // Trạng thái tạm khóa (suspended_by)
+    const suspEl = document.getElementById('ze-monitor-suspended');
+    if (suspEl) {
+        if (status.suspended_by) {
+            suspEl.innerText = `BỊ KHÓA BỞI ${status.suspended_by.toUpperCase()}`;
+            suspEl.style.color = "#f59e0b";
+        } else {
+            suspEl.innerText = "KHÔNG";
+            suspEl.style.color = "#10b981";
+        }
+    }
+}
+
+async function saveZeroExportConfigSilent() {
+    const projectId = document.getElementById('ze-project-select').value;
+    if (!projectId) return false;
+
+    const meterSelectVal = document.getElementById('ze-meter-select').value;
+    const body = {
+        meter_id: meterSelectVal ? parseInt(meterSelectVal) : null,
+        meter_direction: document.getElementById('ze-meter-direction').value,
+        export_limit_w: parseFloat(document.getElementById('ze-export-limit-w').value),
+        deadband_w: parseFloat(document.getElementById('ze-deadband-w').value),
+        gain: parseFloat(document.getElementById('ze-gain').value),
+        ramp_kw_per_step: parseFloat(document.getElementById('ze-ramp-kw').value),
+        meter_fail_threshold: parseInt(document.getElementById('ze-fail-threshold').value),
+    };
+
+    if (!body.meter_id) {
+        alert("Vui lòng chọn Meter PCC đo lưới trước!");
+        return false;
+    }
+
+    try {
+        const res = await apiCall(`/zero-export/${projectId}/config`, 'PUT', body);
+        return res && res.success;
+    } catch (e) {
+        console.error(e);
+        alert("Lỗi khi lưu cấu hình: " + e.message);
+        return false;
+    }
+}
+
+async function saveZeroExportConfig() {
+    const success = await saveZeroExportConfigSilent();
+    if (success) {
+        alert("Lưu cấu hình Zero Export thành công!");
+        loadZeroExportConfig();
+    } else {
+        alert("Lưu cấu hình thất bại.");
+    }
+}
+
+async function toggleZeroExport(enable) {
+    const projectId = document.getElementById('ze-project-select').value;
+    if (!projectId) return;
+
+    if (enable) {
+        // Tự động lưu cấu hình trước khi BẬT để đảm bảo meter_id được lưu vào DB
+        const saved = await saveZeroExportConfigSilent();
+        if (!saved) return; // Dừng lại nếu lưu cấu hình thất bại
+    }
+
+    const action = enable ? "enable" : "disable";
+    try {
+        const res = await apiCall(`/zero-export/${projectId}/${action}`, 'POST');
+        if (res && res.success) {
+            showToast("Zero Export", enable ? "Đã bật Zero Export" : "Đã tắt Zero Export");
+            loadZeroExportConfig();
+        } else {
+            // Hiển thị chi tiết lỗi từ backend nếu có (ví dụ: detail lỗi từ HTTPException)
+            const errorMsg = res && res.detail ? res.detail : "Không thể thực hiện thao tác";
+            alert("Thao tác thất bại: " + errorMsg);
+        }
+    } catch (e) {
+        console.error(e);
+        alert("Lỗi thao tác: " + e.message);
+    }
+}
+
+// =========================================================
+// BATTERY MANAGEMENT & MODAL FUNCTIONALITY
+// =========================================================
+const BATTERY_BRANDS_MODELS = {
+    "BYD": [
+        "Battery-Box Premium HVS",
+        "Battery-Box Premium HVM",
+        "Battery-Box Premium LVS",
+        "Battery-Box Commercial C130",
+        "Battery-Box Commercial C230"
+    ],
+    "Pylontech": [
+        "US3000C",
+        "US5000",
+        "UP5000",
+        "Force-L2",
+        "Force-H2"
+    ],
+    "Dyness": [
+        "DL5.0C",
+        "DL5.0F",
+        "PowerBox G3",
+        "PowerBrick",
+        "PowerBrick Pro",
+        "PowerDepot G2",
+        "PowerBrick SC",
+        "Tower",
+        "Stack280"
+    ],
+    "Sungrow": [
+        "SBR096",
+        "SBR128",
+        "SBR160",
+        "SBR192",
+        "SBH Series",
+        "PowerStack",
+        "PowerTitan"
+    ],
+    "GoodWe": [
+        "Lynx Home F Plus+",
+        "Lynx Home U",
+        "Lynx Home D",
+        "Lynx F G2",
+        "BAT-S",
+        "BAT-C",
+        "Lynx C"
+    ],
+    "Huawei": [
+        "LUNA2000-5-S0",
+        "LUNA2000-10-S0",
+        "LUNA2000-15-S0",
+        "LUNA2000-7-S1",
+        "LUNA2000-14-S1",
+        "LUNA2000-21-S1"
+    ],
+    "Deye": [
+        "SE-G5.1 Pro",
+        "SE-G5.1 Pro-B",
+        "RW-F10.2",
+        "RW-F16",
+        "BOS-G",
+        "BOS-G Pro"
+    ],
+    "Pytes": [
+        "E-Box V5",
+        "E-Box V5 Alpha",
+        "V10",
+        "V10a",
+        "V5°",
+        "HV48100"
+    ],
+    "Growatt": [
+        "ARK XH",
+        "ARK LV",
+        "APX HV",
+        "APX 98034-P2",
+        "ARK 2.5L-A1"
+    ],
+    "SolaX": [
+        "T-BAT H 3.0",
+        "T-BAT H 5.8",
+        "T-BAT H 12.0",
+        "T-BAT-SYS-HV",
+        "T-BAT-SYS-LV",
+        "HS50E",
+        "TSYS-HS51"
+    ],
+    "Sigenergy / Sigen": [
+        "SigenStor BAT 5.0",
+        "SigenStor BAT 8.0",
+        "SigenStor BAT 12.0"
+    ],
+    "Anker SOLIX": [
+        "SOLIX X1",
+        "SOLIX F3800",
+        "SOLIX BP1600",
+        "SOLIX Solarbank"
+    ],
+    "CATL": [
+        "EnerOne",
+        "EnerOne Plus",
+        "EnerC",
+        "EnerC Plus"
+    ],
+    "AlphaESS": [
+        "SMILE5",
+        "SMILE-G3",
+        "STORION ECO",
+        "STORION-T50",
+        "STORION-LC"
+    ],
+    "REPT": [
+        "Powtrix",
+        "Powtrix 5.12",
+        "Powtrix 10.24",
+        "Powtrix C&I ESS"
+    ],
+    "EVE Energy": [
+        "EVE LF280K",
+        "EVE MB31",
+        "EVE 314Ah ESS",
+        "EVE 628Ah ESS"
+    ],
+    "Trina Storage": [
+        "Elementa",
+        "Elementa 2",
+        "Elementa 2 Pro"
+    ],
+    "Narada": [
+        "REX Series",
+        "REX-L",
+        "REX-L Plus",
+        "Narada EnerOne",
+        "Narada ESS"
+    ],
+    "Leoch": [
+        "LFeLi Series",
+        "PowerX Series",
+        "ESS Battery System"
+    ],
+    "SVE": [
+        "SVE 5.12 kWh",
+        "SVE 10.24 kWh",
+        "SVE 15.36 kWh",
+        "SVE 51.2V Series",
+        "SVE ESS"
+    ],
+    "PTESS": [
+        "PTESS 5.12 kWh",
+        "PTESS 10.24 kWh",
+        "PTESS 15.36 kWh",
+        "PTESS ESS Rack"
+    ],
+    "PowerBox": [
+        "PowerBox 5.12 kWh",
+        "PowerBox 10.24 kWh",
+        "PowerBox 15.36 kWh",
+        "PowerBox ESS Rack"
+    ]
+};
+
+let settingsBatteries = [];
+
+async function loadBatteriesUI() {
+    console.log("Loading Batteries UI...");
+    try {
+        const batteries = await apiCall('/batteries');
+        settingsBatteries = batteries || [];
+        renderBatteriesTable(settingsBatteries);
+    } catch (e) {
+        console.error("Failed to load batteries:", e);
+    }
+}
+
+function renderBatteriesTable(batteries) {
+    const tbody = document.getElementById('battery-table-body');
+    if (!tbody) return;
+
+    if (!batteries || batteries.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="8" style="text-align:center; opacity: 0.6;">Chưa có Pin lưu trữ nào được khai báo.</td></tr>';
+        return;
+    }
+
+    tbody.innerHTML = batteries.map(b => {
+        const isAct = b.is_active !== false;
+        const project = settingsProjects.find(p => String(p.id) === String(b.project_id));
+        const projectName = project ? project.name : (b.project_id ? `Dự án #${b.project_id}` : 'Chưa gán');
+
+        return `
+            <tr>
+                <td>${b.serial_number || '-'}</td>
+                <td><strong>${b.brand || '-'}</strong></td>
+                <td>${b.model || '-'}</td>
+                <td>${b.capacity_kwh != null ? b.capacity_kwh + ' kWh' : '-'}</td>
+                <td>${b.capacity_ah != null ? b.capacity_ah + ' Ah' : '-'}</td>
+                <td>${projectName}</td>
+                <td><span class="badge ${isAct ? 'success' : 'danger'}">${isAct ? 'Hoạt động' : 'Ngưng hoạt động'}</span></td>
+                <td>
+                    <div style="display:flex; gap: 6px;">
+                        <button class="action-btn" onclick="openBatteryModal(${b.id})" title="Chỉnh sửa"><i class="fas fa-edit"></i></button>
+                        <button class="action-btn delete" onclick="deleteBatteryUI(${b.id})" title="Xóa"><i class="fas fa-trash"></i></button>
+                    </div>
+                </td>
+            </tr>
+        `;
+    }).join('');
+}
+
+function initBatteryBrandDropdown() {
+    const brandSelect = document.getElementById('batt-brand');
+    if (!brandSelect) return;
+
+    let html = '<option value="">-- Chọn Hãng (Brand) --</option>';
+    Object.keys(BATTERY_BRANDS_MODELS).forEach(brand => {
+        html += `<option value="${brand}">${brand}</option>`;
+    });
+    brandSelect.innerHTML = html;
+}
+
+function onBatteryBrandChange(selectedModel = '') {
+    const brandSelect = document.getElementById('batt-brand');
+    const modelSelect = document.getElementById('batt-model');
+    if (!brandSelect || !modelSelect) return;
+
+    const brand = brandSelect.value;
+    const models = BATTERY_BRANDS_MODELS[brand] || [];
+
+    let html = '<option value="">-- Chọn Model --</option>';
+    models.forEach(m => {
+        html += `<option value="${m}">${m}</option>`;
+    });
+    modelSelect.innerHTML = html;
+
+    if (selectedModel) {
+        if (!models.includes(selectedModel)) {
+            const opt = document.createElement('option');
+            opt.value = selectedModel;
+            opt.innerText = selectedModel;
+            modelSelect.appendChild(opt);
+        }
+        modelSelect.value = selectedModel;
+    }
+}
+
+function openBatteryModal(batteryId = null) {
+    initBatteryBrandDropdown();
+
+    const projSelect = document.getElementById('batt-project-id');
+    if (projSelect) {
+        projSelect.innerHTML = '<option value="">-- Chọn Dự Án --</option>' +
+            settingsProjects.map(p => `<option value="${p.id}">${p.name}</option>`).join('');
+    }
+
+    const modalTitle = document.getElementById('batt-modal-title');
+    const idInput = document.getElementById('batt-id');
+    
+    if (batteryId) {
+        const b = settingsBatteries.find(item => String(item.id) === String(batteryId));
+        if (!b) return;
+
+        if (modalTitle) modalTitle.innerText = "Chỉnh Sửa Thông Tin Pin Lưu Trữ";
+        if (idInput) idInput.value = b.id;
+
+        document.getElementById('batt-project-id').value = b.project_id || '';
+        document.getElementById('batt-serial').value = b.serial_number || '';
+        document.getElementById('batt-brand').value = b.brand || '';
+        onBatteryBrandChange(b.model || '');
+
+        document.getElementById('batt-capacity-kwh').value = b.capacity_kwh != null ? b.capacity_kwh : '';
+        document.getElementById('batt-capacity-ah').value = b.capacity_ah != null ? b.capacity_ah : '';
+        document.getElementById('batt-cells-per-module').value = b.cells_per_module != null ? b.cells_per_module : '';
+        document.getElementById('batt-modules-in-series').value = b.modules_in_series != null ? b.modules_in_series : '';
+        document.getElementById('batt-parallel-conns').value = b.num_parallel_connections != null ? b.num_parallel_connections : '';
+        document.getElementById('batt-index').value = b.battery_index != null ? b.battery_index : 1;
+        document.getElementById('batt-is-active').checked = b.is_active !== false;
+    } else {
+        if (modalTitle) modalTitle.innerText = "Thêm Mới Pin Lưu Trữ (Battery)";
+        if (idInput) idInput.value = '';
+
+        if (projSelect && settingsProjects.length > 0) projSelect.value = settingsProjects[0].id;
+        document.getElementById('batt-serial').value = '';
+        document.getElementById('batt-brand').value = '';
+        onBatteryBrandChange('');
+        document.getElementById('batt-capacity-kwh').value = '';
+        document.getElementById('batt-capacity-ah').value = '';
+        document.getElementById('batt-cells-per-module').value = '';
+        document.getElementById('batt-modules-in-series').value = '';
+        document.getElementById('batt-parallel-conns').value = '';
+        document.getElementById('batt-index').value = 1;
+        document.getElementById('batt-is-active').checked = true;
+    }
+
+    const modal = document.getElementById('modal-battery');
+    if (modal) modal.style.display = 'flex';
+}
+
+function closeBatteryModal() {
+    const modal = document.getElementById('modal-battery');
+    if (modal) modal.style.display = 'none';
+}
+
+async function saveBattery() {
+    const id = document.getElementById('batt-id').value;
+    const projectId = document.getElementById('batt-project-id').value;
+    const brand = document.getElementById('batt-brand').value;
+    const model = document.getElementById('batt-model').value;
+    const serial = document.getElementById('batt-serial').value.trim();
+
+    if (!brand) {
+        alert("Vui lòng chọn Hãng sản xuất Pin (Brand)!");
+        return;
+    }
+    if (!model) {
+        alert("Vui lòng chọn Model Pin!");
+        return;
+    }
+
+    const parseNullFloat = (val) => (val === "" || val === null || isNaN(val)) ? null : parseFloat(val);
+    const parseNullInt = (val) => (val === "" || val === null || isNaN(val)) ? null : parseInt(val, 10);
+
+    const payload = {
+        project_id: parseNullInt(projectId),
+        brand: brand,
+        model: model,
+        serial_number: serial || `BATT_${Date.now()}`,
+        capacity_kwh: parseNullFloat(document.getElementById('batt-capacity-kwh').value),
+        capacity_ah: parseNullFloat(document.getElementById('batt-capacity-ah').value),
+        cells_per_module: parseNullInt(document.getElementById('batt-cells-per-module').value),
+        modules_in_series: parseNullInt(document.getElementById('batt-modules-in-series').value),
+        num_parallel_connections: parseNullInt(document.getElementById('batt-parallel-conns').value),
+        battery_index: parseNullInt(document.getElementById('batt-index').value) || 1,
+        is_active: document.getElementById('batt-is-active').checked
+    };
+
+    try {
+        let res;
+        if (id) {
+            res = await apiCall(`/batteries/${id}`, 'PATCH', payload);
+        } else {
+            res = await apiCall('/batteries', 'POST', payload);
+        }
+
+        if (res) {
+            showToast("Battery Management", id ? "Đã cập nhật Pin thành công." : "Đã thêm mới Pin thành công.");
+            closeBatteryModal();
+            loadBatteriesUI();
+        } else {
+            alert("Lưu thông tin Pin thất bại.");
+        }
+    } catch (e) {
+        console.error(e);
+        alert("Lỗi khi lưu thông tin Pin: " + e.message);
+    }
+}
+
+async function deleteBatteryUI(batteryId) {
+    if (!confirm("Bạn có chắc chắn muốn xóa bộ Pin này khỏi hệ thống không?")) return;
+
+    try {
+        const res = await apiCall(`/batteries/${batteryId}`, 'DELETE');
+        if (res) {
+            showToast("Battery Management", "Đã xóa Pin khỏi hệ thống.");
+            loadBatteriesUI();
+        } else {
+            alert("Xóa Pin thất bại.");
+        }
+    } catch (e) {
+        console.error(e);
+        alert("Lỗi khi xóa Pin: " + e.message);
+    }
+}
+
+async function startBatteryBMSScan() {
+    const projSelect = document.getElementById('batt-scan-project-select');
+    const projId = projSelect ? projSelect.value : '';
+    const msg = document.getElementById('batt-scan-msg');
+
+    if (!projId) {
+        alert("Vui lòng chọn Dự án để gán Pin sau khi quét!");
+        return;
+    }
+
+    const driver = document.getElementById('batt-scan-driver').value;
+    const commId = document.getElementById('batt-scan-comm-select').value;
+    const slaveStart = parseInt(document.getElementById('batt-scan-start').value, 10) || 1;
+    const slaveEnd = parseInt(document.getElementById('batt-scan-end').value, 10) || 10;
+
+    const commObj = settingsComms.find(c => String(c.id) === String(commId)) || {
+        comm_type: "TCP", host: "127.0.0.1", port: 502
+    };
+
+    if (msg) {
+        msg.innerText = "Đang quét các bộ Pin BMS...";
+        msg.className = "text-primary";
+    }
+
+    const payload = {
+        project_id: parseInt(projId, 10),
+        driver: driver,
+        comm_type: commObj.comm_type || "TCP",
+        host: commObj.host,
+        port: commObj.port,
+        com_port: commObj.com_port,
+        baudrate: commObj.baudrate,
+        slave_id_start: slaveStart,
+        slave_id_end: slaveEnd
+    };
+
+    try {
+        const res = await apiCall('/scan/batteries', 'POST', payload);
+        if (res && res.ok) {
+            if (msg) {
+                msg.innerText = `Hoàn thành quét BMS! Tìm thấy ${res.found_count} bộ Pin.`;
+                msg.className = "text-success";
+            }
+            showToast("BMS Scan", `Đã phát hiện và lưu ${res.found_count} bộ Pin BMS.`);
+            loadBatteriesUI();
+        } else {
+            if (msg) {
+                msg.innerText = "Quét BMS thất bại: " + (res ? res.error : "Lỗi kết nối");
+                msg.className = "text-danger";
+            }
+        }
+    } catch (e) {
+        if (msg) {
+            msg.innerText = "Lỗi quét BMS: " + e.message;
+            msg.className = "text-danger";
+        }
+    }
 }

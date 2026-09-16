@@ -89,6 +89,157 @@
                         </div>
                     </div>
                 </div>
+
+                <!-- Power Flow Diagram Card -->
+                <div class="glass card fade-in power-flow-card" style="margin-top:24px; padding:24px;">
+                    <div class="power-flow-header">
+                        <h2><i class="fas fa-project-diagram" style="color:var(--primary);"></i> Power Flow</h2>
+                        <div class="pf-header-actions">
+                            <span class="pf-live-badge"><i class="fas fa-circle-notch fa-spin"></i> Realtime</span>
+                        </div>
+                    </div>
+
+                    <div class="power-flow-container">
+                        <!-- SVG Connecting Flow Lines (Solis 2-Layer Dual Paths) -->
+                        <svg class="pf-svg-canvas" viewBox="0 0 1150 500" preserveAspectRatio="none">
+                            <defs>
+                                <linearGradient id="grad-pv" x1="0%" y1="0%" x2="100%" y2="100%">
+                                    <stop offset="0%" stop-color="#f59e0b"/>
+                                    <stop offset="100%" stop-color="#eab308"/>
+                                </linearGradient>
+                                <linearGradient id="grad-grid" x1="100%" y1="0%" x2="0%" y2="100%">
+                                    <stop offset="0%" stop-color="#ef4444"/>
+                                    <stop offset="100%" stop-color="#f87171"/>
+                                </linearGradient>
+                                <linearGradient id="grad-grid-load" x1="0%" y1="0%" x2="100%" y2="0%">
+                                    <stop offset="0%" stop-color="#f97316"/>
+                                    <stop offset="100%" stop-color="#fb923c"/>
+                                </linearGradient>
+                                <linearGradient id="grad-batt" x1="0%" y1="100%" x2="100%" y2="0%">
+                                    <stop offset="0%" stop-color="#10b981"/>
+                                    <stop offset="100%" stop-color="#34d399"/>
+                                </linearGradient>
+                                <linearGradient id="grad-backup" x1="0%" y1="0%" x2="100%" y2="100%">
+                                    <stop offset="0%" stop-color="#f97316"/>
+                                    <stop offset="100%" stop-color="#fdba74"/>
+                                </linearGradient>
+
+                                <!-- Flow Arrow Markers -->
+                                <marker id="arrow-pv" viewBox="0 0 10 10" refX="6" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+                                    <path d="M 0 1.5 L 8 5 L 0 8.5 z" fill="#f59e0b" />
+                                </marker>
+                                <marker id="arrow-grid" viewBox="0 0 10 10" refX="6" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+                                    <path d="M 0 1.5 L 8 5 L 0 8.5 z" fill="#ef4444" />
+                                </marker>
+                                <marker id="arrow-grid-load" viewBox="0 0 10 10" refX="6" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+                                    <path d="M 0 1.5 L 8 5 L 0 8.5 z" fill="#f97316" />
+                                </marker>
+                                <marker id="arrow-batt" viewBox="0 0 10 10" refX="6" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+                                    <path d="M 0 1.5 L 8 5 L 0 8.5 z" fill="#10b981" />
+                                </marker>
+                                <marker id="arrow-backup" viewBox="0 0 10 10" refX="6" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+                                    <path d="M 0 1.5 L 8 5 L 0 8.5 z" fill="#f97316" />
+                                </marker>
+                            </defs>
+
+                            <!-- Layer 1: Solid Base Lines (Đường nét liền cố định) -->
+                            <path id="path-pv-base" class="pf-base-line pf-base-pv" d="M 370 92.5 L 555 92.5 Q 575 92.5 575 112.5 L 575 205" />
+                            <path id="path-grid-base" class="pf-base-line pf-base-grid" d="M 575 205 L 575 112.5 Q 575 92.5 595 92.5 L 780 92.5" />
+                            <path id="path-grid-load-base" class="pf-base-line pf-base-grid-load" d="M 620 250 L 780 250" />
+                            <path id="path-batt-base" class="pf-base-line pf-base-batt" d="M 370 407.5 L 555 407.5 Q 575 407.5 575 387.5 L 575 295" />
+                            <path id="path-backup-base" class="pf-base-line pf-base-backup" d="M 575 295 L 575 387.5 Q 575 407.5 595 407.5 L 780 407.5" />
+
+                            <!-- Layer 2: Moving Flow Overlay Lines (Hạt công suất di chuyển) -->
+                            <path id="path-pv-flow" class="pf-flow-line pf-flow-pv" d="M 370 92.5 L 555 92.5 Q 575 92.5 575 112.5 L 575 205" stroke="url(#grad-pv)" />
+                            <path id="path-grid-flow" class="pf-flow-line pf-flow-grid" d="M 575 205 L 575 112.5 Q 575 92.5 595 92.5 L 780 92.5" stroke="url(#grad-grid)" />
+                            <path id="path-grid-load-flow" class="pf-flow-line pf-flow-grid-load" d="M 620 250 L 780 250" stroke="url(#grad-grid-load)" />
+                            <path id="path-batt-flow" class="pf-flow-line pf-flow-batt" d="M 370 407.5 L 555 407.5 Q 575 407.5 575 387.5 L 575 295" stroke="url(#grad-batt)" />
+                            <path id="path-backup-flow" class="pf-flow-line pf-flow-backup" d="M 575 295 L 575 387.5 Q 575 407.5 595 407.5 L 780 407.5" stroke="url(#grad-backup)" />
+                        </svg>
+
+                        <!-- 6 Nodes Layout matching Hãng Capsule Cards -->
+                        <div class="pf-nodes-wrapper">
+                            <!-- Node 1: PV (Top Left Capsule) -->
+                            <div class="pf-capsule-card pf-capsule-pv" id="pf-card-pv">
+                                <div class="pf-capsule-info">
+                                    <div class="pf-capsule-title"><span class="pf-dot yellow"></span> PV</div>
+                                    <div class="pf-capsule-meta">Sản lượng ngày : <b id="pf-daily-pv">0.0</b>kWh</div>
+                                    <div class="pf-capsule-meta">Công suất DC : <b id="pf-dc-pv">0.0</b>kW</div>
+                                </div>
+                                <div class="pf-circle-node pf-circle-pv">
+                                    <i class="fas fa-solar-panel"></i>
+                                    <span class="pf-node-val" id="pf-val-pv">0.0kW</span>
+                                </div>
+                            </div>
+
+                            <!-- Node 2: Center Inverter -->
+                            <div class="pf-center-node" id="pf-node-inverter">
+                                <div class="pf-center-circle">
+                                    <i class="fas fa-charging-station"></i>
+                                    <span class="pf-badge-count" id="pf-inv-count">x1</span>
+                                </div>
+                                <div class="pf-center-val" id="pf-val-inverter">0.0kW</div>
+                            </div>
+
+                            <!-- Node 3: Grid (Top Right Capsule) -->
+                            <div class="pf-capsule-card pf-capsule-grid" id="pf-card-grid">
+                                <div class="pf-circle-node pf-circle-grid">
+                                    <i class="fas fa-broadcast-tower"></i>
+                                    <span class="pf-node-val" id="pf-val-grid">0.0kW</span>
+                                </div>
+                                <div class="pf-capsule-info">
+                                    <div class="pf-capsule-title"><span class="pf-dot red"></span> Lưới điện</div>
+                                    <div class="pf-capsule-meta">Nhập điện trong ngày : <b id="pf-daily-grid-imp">0</b>kWh</div>
+                                    <div class="pf-capsule-meta">Xuất điện trong ngày : <b id="pf-daily-grid-exp">0</b>kWh</div>
+                                </div>
+                            </div>
+
+                            <!-- Node 4: Grid Load (Middle Right Capsule) -->
+                            <div class="pf-capsule-card pf-capsule-grid-load" id="pf-card-grid-load">
+                                <div class="pf-circle-node pf-circle-grid-load">
+                                    <i class="fas fa-home"></i>
+                                    <span class="pf-node-val" id="pf-val-grid-load">0.0kW</span>
+                                </div>
+                                <div class="pf-capsule-info">
+                                    <div class="pf-capsule-title"><span class="pf-dot orange"></span> Tải lưới</div>
+                                    <div class="pf-capsule-meta">Tiêu thụ trong ngày : <b id="pf-daily-grid-load">0.0</b>kWh</div>
+                                </div>
+                            </div>
+
+                            <!-- Node 5: Battery (Bottom Left Capsule) -->
+                            <div class="pf-capsule-card pf-capsule-battery" id="pf-card-battery">
+                                <div class="pf-capsule-info">
+                                    <div class="pf-capsule-title"><span class="pf-dot green"></span> Pin <i class="fas fa-cog" style="font-size:11px; opacity:0.6;"></i></div>
+                                    <div class="pf-capsule-meta">Sạc hàng ngày : <b id="pf-daily-batt-charge">0</b>kWh</div>
+                                    <div class="pf-capsule-meta">Xả điện hàng ngày : <b id="pf-daily-batt-discharge">0</b>kWh</div>
+                                </div>
+                                <div class="pf-circle-node pf-circle-battery">
+                                    <span class="pf-batt-count-badge" id="pf-batt-count">x1</span>
+                                    <span class="pf-soc-pill" id="pf-soc-pill"><span id="pf-soc-val">100</span>% ⚡</span>
+                                    <i class="fas fa-battery-three-quarters" style="margin-top:12px;"></i>
+                                    <span class="pf-node-val" id="pf-val-battery">0.0kW</span>
+                                </div>
+                            </div>
+
+                            <!-- Node 6: Backup Load (Bottom Right Capsule) -->
+                            <div class="pf-capsule-card pf-capsule-backup" id="pf-card-backup">
+                                <div class="pf-circle-node pf-circle-backup">
+                                    <i class="fas fa-house-user"></i>
+                                    <span class="pf-node-val" id="pf-val-backup">0.0kW</span>
+                                </div>
+                                <div class="pf-capsule-info">
+                                    <div class="pf-capsule-title"><span class="pf-dot amber"></span> Tải Back-Up</div>
+                                    <div class="pf-capsule-meta">Tiêu thụ trong ngày : <b id="pf-daily-backup-load">0</b>kWh</div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="pf-footer">
+                        <span class="pf-last-update-text">Cập nhật cuối: <span id="pf-last-update">--/--/---- --:--:--</span></span>
+                    </div>
+                </div>
+
                 <h2>Danh sách Dự án</h2>
                 <div class="glass table-container fade-in" style="margin-top:24px;">
                     <table>
@@ -198,8 +349,8 @@
                     <div class="inner-tab active" id="btn-tab-proj" onclick="switchInnerTab('proj-tab')">Quản lý Dự án
                     </div>
                     <div class="inner-tab" id="btn-tab-dev" onclick="switchInnerTab('dev-tab')">Quản lý Thiết bị</div>
-                    <div class="inner-tab" id="btn-tab-evn" onclick="switchInnerTab('evn-tab')">Cấu hình EVN & VPN IPsec
-                    </div>
+                    <div class="inner-tab" id="btn-tab-evn" onclick="switchInnerTab('evn-tab')">Cấu hình EVN & VPN IPsec</div>
+                    <div class="inner-tab" id="btn-tab-ze" onclick="switchInnerTab('ze-tab')">Cấu hình Zero Export</div>
                 </div>
 
                 <!-- Tab content 1: Quản lý dự án -->
@@ -352,6 +503,16 @@
                                 <div class="input-group"><label>Số pha</label><input type="number" id="inv-phase"></div>
                             </div>
 
+                            <div class="form-row" style="margin-bottom: 15px;">
+                                <div class="input-group">
+                                    <label>Trạng thái vận hành</label>
+                                    <select id="inv-is-active">
+                                        <option value="true">Hoạt động</option>
+                                        <option value="false">Ngưng hoạt động</option>
+                                    </select>
+                                </div>
+                            </div>
+
                             <div style="display:flex; flex-direction: column; gap:10px;">
                                 <div style="display:flex; gap:10px;">
                                     <button class="btn btn-success" onclick="saveInverter()">CẬP NHẬT TRÊN PI</button>
@@ -374,9 +535,13 @@
                                 <label>Chọn Driver Inverter</label>
                                 <select id="inv-scan-driver-select">
                                     <option value="huawei_sun2000_110ktl">Huawei SUN2000-110KTL</option>
+                                    <option value="huawei_sun2000_60ktl">Huawei SUN2000-60KTL</option>
+                                    <option value="huawei_sun2000_50ktl">Huawei SUN2000-50KTL</option>
                                     <option value="sungrow_sg33cx">Sungrow SG33CX</option>
                                     <option value="sungrow_sg50cx">Sungrow SG50CX</option>
                                     <option value="sungrow_sg110cx">Sungrow SG110CX</option>
+                                    <option value="sungrow_sg125cxp2">Sungrow SG125CX-P2</option>
+                                    <option value="solis_s6_eh3p99_9k10_nv_yd_h">Solis S6 Hybrid 99.9kW</option>
                                     <option value="solis_110k">Solis 110K</option>
                                     <option value="canadian_csi110KTL1400GL02E">Canadian CSI-110KTL</option>
                                     <option value="goodwe_gw80kmt">GoodWe GW80KMT</option>
@@ -481,6 +646,72 @@
                             <div style="display:flex; gap:10px;">
                                 <button class="btn btn-success" onclick="saveMeter()">LƯU METER</button>
                                 <button class="btn btn-secondary" onclick="resetMeterForm()">LÀM MỚI</button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- 3. Quản lý Battery (Pin lưu trữ) -->
+                    <div class="config-card" style="margin-top: 24px;">
+                        <div class="card-header" style="display: flex; justify-content: space-between; align-items: center;">
+                            <span>Quản lý Pin Lưu Trữ (Battery)</span>
+                            <button class="btn btn-primary btn-sm" style="width: auto; padding: 6px 16px;" onclick="openBatteryModal()"><i class="fas fa-plus"></i> Thêm Pin Mới</button>
+                        </div>
+                        <div class="table-container" style="margin-bottom: 0;">
+                            <table>
+                                <thead>
+                                    <tr>
+                                        <th>Serial Number</th>
+                                        <th>Hãng (Brand)</th>
+                                        <th>Model</th>
+                                        <th>Dung lượng (kWh)</th>
+                                        <th>Dung lượng (Ah)</th>
+                                        <th>Dự án</th>
+                                        <th>Trạng thái</th>
+                                        <th>Hành động</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="battery-table-body">
+                                    <tr>
+                                        <td colspan="8" style="text-align:center; opacity:0.5;">Đang tải danh sách Pin...</td>
+                                    </tr>
+                                </tbody>
+                            </table>
+                        </div>
+
+                        <!-- Form Auto-Scan Pin trực tiếp từ BMS -->
+                        <div class="glass" style="padding: 16px; border: 1px solid var(--border); margin-top: 20px; border-radius: 12px; background: rgba(30,41,59,0.3);">
+                            <h4 style="font-size: 14px; color: var(--primary); margin-bottom: 12px;"><i class="fas fa-search"></i> Quét Tự Động Pin Trực Tiếp (BMS Direct Scan)</h4>
+                            <div class="form-row" style="margin-bottom: 12px;">
+                                <div class="input-group">
+                                    <label>Dự án gán Pin</label>
+                                    <select id="batt-scan-project-select"></select>
+                                </div>
+                                <div class="input-group">
+                                    <label>Driver BMS Pin</label>
+                                    <select id="batt-scan-driver">
+                                        <option value="PylontechBMS">Pylontech BMS (RS485)</option>
+                                        <option value="SeplosBMS">Seplos BMS (RS485)</option>
+                                        <option value="PaceBMS">Pace BMS (RS485)</option>
+                                    </select>
+                                </div>
+                                <div class="input-group">
+                                    <label>Truyền thông</label>
+                                    <select id="batt-scan-comm-select"></select>
+                                </div>
+                            </div>
+                            <div class="form-row" style="margin-bottom: 12px;">
+                                <div class="input-group">
+                                    <label>Slave ID Bắt đầu</label>
+                                    <input type="number" id="batt-scan-start" value="1" min="1" max="247">
+                                </div>
+                                <div class="input-group">
+                                    <label>Slave ID Kết thúc</label>
+                                    <input type="number" id="batt-scan-end" value="10" min="1" max="247">
+                                </div>
+                            </div>
+                            <div style="display: flex; gap: 10px; align-items: center;">
+                                <button class="btn btn-primary btn-sm" style="width: auto; padding: 6px 18px;" onclick="startBatteryBMSScan()"><i class="fas fa-radar"></i> QUÉT BMS PIN</button>
+                                <span id="batt-scan-msg" style="font-size: 13px; font-weight: 500;"></span>
                             </div>
                         </div>
                     </div>
@@ -640,6 +871,102 @@
                             <button class="btn btn-secondary" onclick="loadEVNVPN()">Get</button>
                             <button class="btn btn-primary" onclick="saveVPNConfig()">Lưu Cấu Hình VPN</button>
                             <button class="btn btn-accent" onclick="applyVPNConfig()">Áp Dụng & Kết Nối VPN</button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Tab content 4: Cấu hình Zero Export -->
+                <div id="ze-tab" class="inner-tab-content">
+                    <div class="config-card">
+                        <div class="card-header">Cấu hình Zero Export cho dự án</div>
+                        
+                        <div class="input-group" style="margin-bottom: 20px;">
+                            <label>Chọn dự án cấu hình Zero Export</label>
+                            <select id="ze-project-select" onchange="loadZeroExportConfig()">
+                                <option value="">-- Chọn dự án --</option>
+                            </select>
+                        </div>
+
+                        <div id="ze-config-form" class="hidden">
+                            <div style="display: flex; gap: 15px; align-items: center; margin-bottom: 25px; background: rgba(255,255,255,0.05); padding: 15px; border-radius: 8px;">
+                                <div style="font-weight: 600;">Trạng thái hoạt động:</div>
+                                <div id="ze-status-badge" class="badge badge-secondary" style="padding: 6px 12px; font-size: 13px; border-radius: 4px; background: #6b7280; color: #fff;">TẮT</div>
+                                <button class="btn btn-success btn-sm" id="ze-btn-enable" onclick="toggleZeroExport(true)" style="width: auto;">BẬT</button>
+                                <button class="btn btn-danger btn-sm" id="ze-btn-disable" onclick="toggleZeroExport(false)" style="width: auto;">TẮT</button>
+                            </div>
+
+                            <div class="form-grid">
+                                <div class="input-group">
+                                    <label>Chọn Meter PCC (Đo lưới) *</label>
+                                    <select id="ze-meter-select">
+                                        <option value="">-- Chọn Meter --</option>
+                                    </select>
+                                </div>
+                                <div class="input-group">
+                                    <label>Hướng lắp đặt CT *</label>
+                                    <select id="ze-meter-direction">
+                                        <option value="GRID_SIDE">GRID_SIDE (CT xuôi đo lưới, Import > 0)</option>
+                                        <option value="GRID_SIDE_REVERSED">GRID_SIDE_REVERSED (CT ngược đo lưới, Export > 0)</option>
+                                        <option value="LOAD_SIDE">LOAD_SIDE (CT xuôi đo tải, Load > 0)</option>
+                                        <option value="LOAD_SIDE_REVERSED">LOAD_SIDE_REVERSED (CT ngược đo tải, Load &lt; 0)</option>
+                                    </select>
+                                </div>
+                                <div class="input-group">
+                                    <label>Giới hạn xuất khẩu (W) *</label>
+                                    <input type="number" id="ze-export-limit-w" value="0">
+                                </div>
+                                <div class="input-group">
+                                    <label>Vùng bất nhạy Deadband (W) *</label>
+                                    <input type="number" id="ze-deadband-w" value="200">
+                                </div>
+                                <div class="input-group">
+                                    <label>Hệ số Gain (P-Control) *</label>
+                                    <input type="number" step="0.1" id="ze-gain" value="1.0">
+                                </div>
+                                <div class="input-group">
+                                    <label>Tốc độ tăng/giảm tối đa (kW/chu kỳ) *</label>
+                                    <input type="number" step="1" id="ze-ramp-kw" value="50">
+                                </div>
+                                <div class="input-group">
+                                    <label>Ngưỡng lỗi Meter (số lần mất kết nối) *</label>
+                                    <input type="number" step="1" id="ze-fail-threshold" value="10">
+                                </div>
+                            </div>
+
+                            <div class="button-bar" style="margin-top: 20px; justify-content: flex-start; gap: 10px;">
+                                <button class="btn btn-primary" onclick="saveZeroExportConfig()"><i class="fas fa-save"></i> Lưu cấu hình</button>
+                                <button class="btn btn-secondary" onclick="loadZeroExportConfig()"><i class="fas fa-sync"></i> Refresh Trạng Thái</button>
+                            </div>
+
+                            <div style="margin-top: 30px; border-top: 1px solid rgba(255,255,255,0.1); padding-top: 20px;">
+                                <h3 style="font-size: 15px; color: var(--primary); margin-bottom: 15px;"><i class="fas fa-chart-area"></i> Trạng thái giám sát Realtime (PCC)</h3>
+                                <div class="form-grid" style="grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px;">
+                                    <div class="stat-mini-card" style="background: rgba(255,255,255,0.02); padding: 12px; border-radius: 6px; border: 1px solid rgba(255,255,255,0.05);">
+                                        <div style="font-size: 12px; opacity: 0.6; margin-bottom: 4px;">Công suất lưới (P_grid)</div>
+                                        <div id="ze-monitor-pgrid" style="font-size: 18px; font-weight: 600; color: var(--text);">-- W</div>
+                                    </div>
+                                    <div class="stat-mini-card" style="background: rgba(255,255,255,0.02); padding: 12px; border-radius: 6px; border: 1px solid rgba(255,255,255,0.05);">
+                                        <div style="font-size: 12px; opacity: 0.6; margin-bottom: 4px;">Tổng công suất phát hiện tại</div>
+                                        <div id="ze-monitor-pinv" style="font-size: 18px; font-weight: 600; color: var(--text);">-- W</div>
+                                    </div>
+                                    <div class="stat-mini-card" style="background: rgba(255,255,255,0.02); padding: 12px; border-radius: 6px; border: 1px solid rgba(255,255,255,0.05);">
+                                        <div style="font-size: 12px; opacity: 0.6; margin-bottom: 4px;">Setpoint giới hạn (MAXP)</div>
+                                        <div id="ze-monitor-setpoint" style="font-size: 18px; font-weight: 600; color: var(--primary);">-- kW</div>
+                                    </div>
+                                    <div class="stat-mini-card" style="background: rgba(255,255,255,0.02); padding: 12px; border-radius: 6px; border: 1px solid rgba(255,255,255,0.05);">
+                                        <div style="font-size: 12px; opacity: 0.6; margin-bottom: 4px;">Hành động cuối</div>
+                                        <div id="ze-monitor-action" style="font-size: 16px; font-weight: 600; color: var(--text);">--</div>
+                                    </div>
+                                    <div class="stat-mini-card" style="background: rgba(255,255,255,0.02); padding: 12px; border-radius: 6px; border: 1px solid rgba(255,255,255,0.05);">
+                                        <div style="font-size: 12px; opacity: 0.6; margin-bottom: 4px;">Số lần mất Meter liên tiếp</div>
+                                        <div id="ze-monitor-failcount" style="font-size: 18px; font-weight: 600; color: var(--text);">0</div>
+                                    </div>
+                                    <div class="stat-mini-card" style="background: rgba(255,255,255,0.02); padding: 12px; border-radius: 6px; border: 1px solid rgba(255,255,255,0.05);">
+                                        <div style="font-size: 12px; opacity: 0.6; margin-bottom: 4px;">Trạng thái tạm khóa</div>
+                                        <div id="ze-monitor-suspended" style="font-size: 15px; font-weight: 600; color: var(--success);">KHÔNG</div>
+                                    </div>
+                                </div>
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -1239,9 +1566,9 @@
                                 </tr>
                             </thead>
                             <tbody>
-                                <!-- TCP Channel (5) -->
-                                <tr style="border-bottom: none;">
-                                    <td style="padding: 6px 8px; font-weight: 600; color: var(--accent);">TCP</td>
+                                <!-- TCP Channel 1 (5) -->
+                                <tr style="border-bottom: 1px solid rgba(255,255,255,0.05);">
+                                    <td style="padding: 6px 8px; font-weight: 600; color: var(--accent);">TCP 1</td>
                                     <td style="padding: 6px 8px;">
                                         <input type="text" id="comm-host-5" value="192.168.1.10"
                                             style="width:100%; padding:4px 6px; border-radius:4px; background:var(--bg-dark); border:1px solid var(--border); color:var(--text); font-size:12.5px;">
@@ -1271,6 +1598,44 @@
                                     </td>
                                     <td style="padding: 6px 8px;">
                                         <select id="comm-role-5"
+                                            style="width:100%; padding:4px 6px; border-radius:4px; background:var(--bg-dark); border:1px solid var(--border); color:var(--text); font-size:12.5px;">
+                                            <option value="1" selected>Master</option>
+                                            <option value="0">Slave</option>
+                                        </select>
+                                    </td>
+                                </tr>
+                                <!-- TCP Channel 2 (6) -->
+                                <tr style="border-bottom: none;">
+                                    <td style="padding: 6px 8px; font-weight: 600; color: var(--accent);">TCP 2</td>
+                                    <td style="padding: 6px 8px;">
+                                        <input type="text" id="comm-host-6" value="192.168.1.11"
+                                            style="width:100%; padding:4px 6px; border-radius:4px; background:var(--bg-dark); border:1px solid var(--border); color:var(--text); font-size:12.5px;">
+                                    </td>
+                                    <td style="padding: 6px 8px;">
+                                        <input type="number" id="comm-port-6" value="502"
+                                            style="width:100%; padding:4px 6px; border-radius:4px; background:var(--bg-dark); border:1px solid var(--border); color:var(--text); font-size:12.5px;">
+                                    </td>
+                                    <td style="padding: 6px 8px;">
+                                        <input type="number" step="0.1" id="comm-timeout-6" value="1.0"
+                                            style="width:100%; padding:4px 6px; border-radius:4px; background:var(--bg-dark); border:1px solid var(--border); color:var(--text); font-size:12.5px;">
+                                    </td>
+                                    <td style="padding: 6px 8px;">
+                                        <input type="number" id="comm-start-6" value="1"
+                                            style="width:100%; padding:4px 6px; border-radius:4px; background:var(--bg-dark); border:1px solid var(--border); color:var(--text); font-size:12.5px;">
+                                    </td>
+                                    <td style="padding: 6px 8px;">
+                                        <input type="number" id="comm-end-6" value="30"
+                                            style="width:100%; padding:4px 6px; border-radius:4px; background:var(--bg-dark); border:1px solid var(--border); color:var(--text); font-size:12.5px;">
+                                    </td>
+                                    <td style="padding: 6px 8px;">
+                                        <select id="comm-multimaster-6"
+                                            style="width:100%; padding:4px 6px; border-radius:4px; background:var(--bg-dark); border:1px solid var(--border); color:var(--text); font-size:12.5px;">
+                                            <option value="0" selected>Tắt</option>
+                                            <option value="1">Bật</option>
+                                        </select>
+                                    </td>
+                                    <td style="padding: 6px 8px;">
+                                        <select id="comm-role-6"
                                             style="width:100%; padding:4px 6px; border-radius:4px; background:var(--bg-dark); border:1px solid var(--border); color:var(--text); font-size:12.5px;">
                                             <option value="1" selected>Master</option>
                                             <option value="0">Slave</option>
@@ -1422,6 +1787,23 @@
                                 <tbody id="sync-inverters-body"></tbody>
                             </table>
                         </div>
+                        <h4 style="margin-top:15px; margin-bottom:8px; font-size:14px; color:var(--primary);">Danh sách Pin Lưu Trữ (Batteries)</h4>
+                        <div class="glass table-container" style="margin-bottom:20px;">
+                            <table>
+                                <thead>
+                                    <tr>
+                                        <th>SN Battery</th>
+                                        <th>Model</th>
+                                        <th>Trạng thái Local</th>
+                                        <th>Trạng thái Server</th>
+                                        <th>Hành động</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="sync-batteries-body">
+                                    <tr><td colspan="5" style="text-align:center; opacity:0.5;">Chưa có dữ liệu pin...</td></tr>
+                                </tbody>
+                            </table>
+                        </div>
                         <div id="sync-actions" style="display:flex; gap: 10px; margin-top: 15px;">
                             <button class="btn btn-success" id="btn-sync-create" onclick="handleSync()"><i
                                     class="fas fa-cloud-upload-alt"></i> CLOUD CREATE</button>
@@ -1517,7 +1899,83 @@
         </div>
     </div>
 
-    <!-- Modal: Custom Confirm Dialog -->
+        <!-- Modal: Battery Form (Thêm/Sửa Pin Lưu Trữ) -->
+        <div id="modal-battery" class="modal">
+            <div class="modal-content" style="max-width: 650px;">
+                <div class="modal-header">
+                    <h3 id="batt-modal-title" style="color: var(--primary);"><i class="fas fa-car-battery"></i> Thêm Mới Pin Lưu Trữ</h3>
+                    <button class="close-modal" onclick="closeBatteryModal()">&times;</button>
+                </div>
+                <input type="hidden" id="batt-id">
+                <div style="display: flex; flex-direction: column; gap: 15px; margin-bottom: 20px;">
+                    <div class="form-row">
+                        <div class="input-group">
+                            <label>Dự án</label>
+                            <select id="batt-project-id"></select>
+                        </div>
+                        <div class="input-group">
+                            <label>Serial Number (Mã Pin)</label>
+                            <input type="text" id="batt-serial" placeholder="Tự động tạo nếu để trống">
+                        </div>
+                    </div>
+
+                    <div class="form-row">
+                        <div class="input-group">
+                            <label>Hãng Sản Xuất (Brand) <span style="color:red">*</span></label>
+                            <select id="batt-brand" onchange="onBatteryBrandChange()"></select>
+                        </div>
+                        <div class="input-group">
+                            <label>Model Pin <span style="color:red">*</span></label>
+                            <select id="batt-model"></select>
+                        </div>
+                    </div>
+
+                    <div class="form-row">
+                        <div class="input-group">
+                            <label>Dung lượng (kWh)</label>
+                            <input type="number" step="0.1" id="batt-capacity-kwh" placeholder="VD: 10.2 (Để trống = null)">
+                        </div>
+                        <div class="input-group">
+                            <label>Dung lượng (Ah)</label>
+                            <input type="number" step="0.1" id="batt-capacity-ah" placeholder="VD: 100.0 (Để trống = null)">
+                        </div>
+                    </div>
+
+                    <div class="form-row">
+                        <div class="input-group">
+                            <label>Số Cell / Module (Cells per Module)</label>
+                            <input type="number" id="batt-cells-per-module" placeholder="VD: 16 (Để trống = null)">
+                        </div>
+                        <div class="input-group">
+                            <label>Số Module Nối Tiếp (Modules in Series)</label>
+                            <input type="number" id="batt-modules-in-series" placeholder="VD: 4 (Để trống = null)">
+                        </div>
+                    </div>
+
+                    <div class="form-row">
+                        <div class="input-group">
+                            <label>Số Chuỗi Song Song (Parallel Conns)</label>
+                            <input type="number" id="batt-parallel-conns" placeholder="VD: 1 (Để trống = null)">
+                        </div>
+                        <div class="input-group">
+                            <label>Thứ tự Pin (Battery Index)</label>
+                            <input type="number" id="batt-index" value="1" min="1">
+                        </div>
+                    </div>
+
+                    <div class="input-group" style="flex-direction: row; align-items: center; gap: 10px;">
+                        <input type="checkbox" id="batt-is-active" checked style="width: 18px; height: 18px;">
+                        <label for="batt-is-active" style="margin: 0; cursor: pointer;">Trạng thái hoạt động (Is Active)</label>
+                    </div>
+                </div>
+                <div class="button-bar" style="justify-content: flex-end; gap: 12px;">
+                    <button class="btn btn-secondary" onclick="closeBatteryModal()">Hủy</button>
+                    <button class="btn btn-primary" onclick="saveBattery()">Lưu Thông Tin Pin</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Modal: Custom Confirm Dialog -->
     <div id="confirm-modal" class="modal">
         <div class="modal-content" style="max-width: 450px;">
             <div class="modal-header">
@@ -1537,12 +1995,12 @@
         </div>
     </div>
 
-    <script src="/static/js/api.js?v=1.0.1"></script>
-    <script src="/static/js/ui.js?v=1.0.1"></script>
-    <script src="/static/js/dashboard.js?v=1.0.1"></script>
-    <script src="/static/js/settings.js?v=1.0.1"></script>
-    <script src="/static/js/sync.js?v=1.0.1"></script>
-    <script src="/static/js/accounts.js?v=1.0.1"></script>
+    <script src="/static/js/api.js?v=1.0.5"></script>
+    <script src="/static/js/ui.js?v=1.0.5"></script>
+    <script src="/static/js/dashboard.js?v=1.0.5"></script>
+    <script src="/static/js/settings.js?v=1.0.5"></script>
+    <script src="/static/js/sync.js?v=1.0.5"></script>
+    <script src="/static/js/accounts.js?v=1.0.5"></script>
     <script>
         if (token) initApp();
     </script>

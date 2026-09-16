@@ -1303,3 +1303,373 @@ tr.clickable:hover {
     border-radius: 0 !important;
     width: auto !important;
 }
+
+/* =========================================
+   POWER FLOW DIAGRAM STYLES (CAPSULE CARDS)
+   ========================================= */
+.power-flow-card {
+    background: #ffffff;
+    border: 1px solid #e2e8f0;
+    position: relative;
+    overflow: hidden;
+    margin-bottom: 24px;
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.03);
+}
+
+.power-flow-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 16px;
+}
+
+.power-flow-header h2 {
+    font-size: 18px;
+    font-weight: 700;
+    margin: 0;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    color: var(--text);
+}
+
+.pf-live-badge {
+    font-size: 11px;
+    padding: 4px 10px;
+    background: rgba(16, 185, 129, 0.1);
+    color: #10b981;
+    border: 1px solid rgba(16, 185, 129, 0.3);
+    font-weight: 600;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    border-radius: 4px;
+}
+
+.power-flow-container {
+    position: relative;
+    width: 100%;
+    max-width: 1150px;
+    height: 500px;
+    margin: 0 auto;
+}
+
+.pf-svg-canvas {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    z-index: 1;
+    pointer-events: none;
+}
+
+/* Layer 1: Solid Base Lines */
+.pf-base-line {
+    fill: none;
+    stroke-width: 3.5;
+    stroke-linecap: round;
+    opacity: 0.85;
+    transition: stroke 0.4s ease, opacity 0.4s ease;
+}
+
+.pf-base-pv { stroke: #fde047; }
+.pf-base-grid { stroke: #fca5a5; }
+.pf-base-grid-load { stroke: #fdba74; }
+.pf-base-batt { stroke: #c084fc; }
+.pf-base-backup { stroke: #fdba74; }
+
+.pf-base-line.pf-disabled {
+    stroke: #cbd5e1 !important;
+    opacity: 0.6 !important;
+}
+
+/* Layer 2: Moving Flow Overlay Lines */
+.pf-flow-line {
+    fill: none;
+    stroke-width: 3.5;
+    stroke-linecap: round;
+    stroke-dasharray: 12 100;
+    opacity: 1;
+    transition: opacity 0.3s ease;
+}
+
+.pf-flow-line.pf-disabled {
+    display: none !important;
+}
+
+.pf-flow-pv.pf-line-forward {
+    animation: pfFlowDash 1.8s linear infinite;
+    marker-end: url(#arrow-pv);
+}
+
+.pf-flow-grid.pf-line-forward {
+    animation: pfFlowDash 1.8s linear infinite;
+    marker-end: url(#arrow-grid);
+}
+
+.pf-flow-grid.pf-line-reverse {
+    animation: pfFlowDashReverse 1.8s linear infinite;
+    marker-start: url(#arrow-grid);
+}
+
+.pf-flow-grid-load.pf-line-forward {
+    animation: pfFlowDash 1.8s linear infinite;
+    marker-end: url(#arrow-grid-load);
+}
+
+.pf-flow-batt.pf-line-forward {
+    animation: pfFlowDashReverse 1.8s linear infinite;
+    marker-start: url(#arrow-batt);
+}
+
+.pf-flow-batt.pf-line-reverse {
+    animation: pfFlowDash 1.8s linear infinite;
+    marker-end: url(#arrow-batt);
+}
+
+.pf-flow-backup.pf-line-forward {
+    animation: pfFlowDash 1.8s linear infinite;
+    marker-end: url(#arrow-backup);
+}
+
+@keyframes pfFlowDash {
+    from { stroke-dashoffset: 112; }
+    to { stroke-dashoffset: 0; }
+}
+
+@keyframes pfFlowDashReverse {
+    from { stroke-dashoffset: 0; }
+    to { stroke-dashoffset: 112; }
+}
+
+.pf-nodes-wrapper {
+    position: relative;
+    width: 100%;
+    height: 100%;
+    z-index: 2;
+}
+
+/* Capsule Card Layout (SolisCloud Full Width Style) */
+.pf-capsule-card {
+    position: absolute;
+    display: flex;
+    align-items: center;
+    padding: 8px 12px;
+    border-radius: 60px;
+    background: #ffffff;
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.05);
+    border: 1.5px solid #f1f5f9;
+    width: 360px;
+    height: 95px;
+    transition: all 0.3s ease;
+    box-sizing: border-box;
+}
+
+.pf-capsule-card:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 8px 25px rgba(0, 0, 0, 0.09);
+}
+
+.pf-capsule-info {
+    flex: 1;
+    padding: 0 14px;
+}
+
+.pf-capsule-title {
+    font-size: 15px;
+    font-weight: 700;
+    color: #1e293b;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-bottom: 3px;
+}
+
+.pf-dot {
+    width: 3px;
+    height: 14px;
+    border-radius: 2px;
+    display: inline-block;
+}
+.pf-dot.yellow { background: #f59e0b; }
+.pf-dot.red { background: #ef4444; }
+.pf-dot.orange { background: #f97316; }
+.pf-dot.green { background: #10b981; }
+.pf-dot.amber { background: #f59e0b; }
+
+.pf-capsule-meta {
+    font-size: 12px;
+    color: #64748b;
+    line-height: 1.5;
+}
+
+.pf-capsule-meta b {
+    color: #0f172a;
+    font-weight: 700;
+    margin: 0 3px;
+}
+
+.pf-circle-node {
+    width: 76px;
+    height: 76px;
+    border-radius: 50%;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    font-size: 22px;
+    border: 3.5px solid;
+    position: relative;
+    flex-shrink: 0;
+    background: #ffffff;
+}
+
+.pf-node-val {
+    font-size: 12px;
+    font-weight: 700;
+    margin-top: 1px;
+}
+
+/* SolisCloud Precise Positioning (1150px x 500px) */
+
+/* 1. PV (Top Left Capsule) */
+.pf-capsule-pv {
+    top: 45px;
+    left: 20px;
+    background: linear-gradient(135deg, #fffbeb 0%, #ffffff 100%);
+    border-color: #fde68a;
+}
+.pf-circle-pv { border-color: #f59e0b; color: #f59e0b; background: #fffbeb; }
+
+/* 2. Inverter (Center) */
+.pf-center-node {
+    position: absolute;
+    top: 250px;
+    left: 575px;
+    transform: translate(-50%, -50%);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    z-index: 5;
+}
+
+.pf-center-circle {
+    width: 90px;
+    height: 90px;
+    border-radius: 50%;
+    border: 3.5px solid #f97316;
+    color: #f97316;
+    background: #ffffff;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 36px;
+    box-shadow: 0 0 25px rgba(249, 115, 22, 0.25);
+    position: relative;
+    animation: pfPulseRing 2.5s infinite ease-in-out;
+}
+
+@keyframes pfPulseRing {
+    0% { box-shadow: 0 0 0 0 rgba(249, 115, 22, 0.4); }
+    70% { box-shadow: 0 0 0 15px rgba(249, 115, 22, 0); }
+    100% { box-shadow: 0 0 0 0 rgba(249, 115, 22, 0); }
+}
+
+.pf-badge-count {
+    position: absolute;
+    bottom: -6px;
+    font-size: 11px;
+    font-weight: 700;
+    background: #f97316;
+    color: #ffffff;
+    padding: 1px 6px;
+    border-radius: 10px;
+}
+
+.pf-center-val {
+    font-size: 15px;
+    font-weight: 700;
+    color: #1e293b;
+    margin-top: 6px;
+}
+
+/* 3. Grid (Top Right Capsule) */
+.pf-capsule-grid {
+    top: 45px;
+    right: 20px;
+    background: linear-gradient(135deg, #fef2f2 0%, #ffffff 100%);
+    border-color: #fecaca;
+}
+.pf-circle-grid { border-color: #ef4444; color: #ef4444; background: #fef2f2; }
+
+/* 4. Grid Load (Middle Right Capsule) */
+.pf-capsule-grid-load {
+    top: 202.5px;
+    right: 20px;
+    background: linear-gradient(135deg, #fff7ed 0%, #ffffff 100%);
+    border-color: #fed7aa;
+}
+.pf-circle-grid-load { border-color: #f97316; color: #f97316; background: #fff7ed; }
+
+/* 5. Battery (Bottom Left Capsule) */
+.pf-capsule-battery {
+    top: 360px;
+    left: 20px;
+    background: linear-gradient(135deg, #f0fdf4 0%, #ffffff 100%);
+    border-color: #bbf7d0;
+}
+.pf-circle-battery { border-color: #10b981; color: #10b981; background: #ecfdf5; }
+
+.pf-batt-count-badge {
+    position: absolute;
+    top: -12px;
+    right: 2px;
+    font-size: 10px;
+    font-weight: 700;
+    color: #10b981;
+    background: #ffffff;
+    padding: 1px 5px;
+    border-radius: 10px;
+    border: 1px solid #10b981;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+}
+
+.pf-soc-pill {
+    position: absolute;
+    top: -12px;
+    left: 50%;
+    transform: translateX(-50%);
+    background: #10b981;
+    color: #ffffff;
+    font-size: 9px;
+    font-weight: 700;
+    padding: 1px 6px;
+    border-radius: 10px;
+    white-space: nowrap;
+    box-shadow: 0 2px 4px rgba(16, 185, 129, 0.3);
+}
+
+/* 6. Backup Load (Bottom Right Capsule) */
+.pf-capsule-backup {
+    top: 360px;
+    right: 20px;
+    background: linear-gradient(135deg, #fff7ed 0%, #ffffff 100%);
+    border-color: #ffedd5;
+}
+.pf-circle-backup { border-color: #f97316; color: #f97316; background: #fff7ed; }
+
+.pf-footer {
+    margin-top: 16px;
+    text-align: center;
+    font-size: 12px;
+    color: #64748b;
+}
+
+@media (max-width: 800px) {
+    .power-flow-container { height: 480px; }
+    .pf-capsule-card { min-width: 200px; height: 70px; padding: 4px; }
+    .pf-circle-node { width: 56px; height: 56px; font-size: 16px; }
+    .pf-capsule-title { font-size: 12px; }
+    .pf-capsule-meta { font-size: 10px; }
+}

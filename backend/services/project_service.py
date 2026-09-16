@@ -3,6 +3,7 @@ from dataclasses import asdict
 from typing import Optional, List, Dict, Any
 from backend.models.project import ProjectCreate, ProjectResponse, ProjectUpdate
 from backend.models.inverter import InverterCreate, InverterResponse, InverterUpdate
+from backend.models.battery import BatteryCreate, BatteryResponse, BatteryUpdate
 from backend.models.realtime import ProjectRealtimeResponse, ProjectRealtimeCreate
 from backend.models.meter import MeterCreate, MeterResponse, MeterUpdate
 import requests
@@ -140,4 +141,34 @@ class ProjectService:
 
     def delete_meter(self, meter_id: int):
         return self.metadata_db.delete_meter(meter_id)
+
+    # ==============================
+    # BATTERY
+    # ==============================
+    def get_all_batteries(self) -> List[BatteryResponse]:
+        return self.metadata_db.get_all_batteries()
+
+    def create_battery(self, data: BatteryCreate) -> int:
+        return self.metadata_db.post_battery(data)
+
+    def upsert_battery(self, data: BatteryCreate) -> BatteryResponse:
+        return self.metadata_db.upsert_battery(data)
+
+    def patch_battery(self, battery_id: int, updates: BatteryUpdate):
+        return self.metadata_db.patch_battery(battery_id, updates)
+
+    def get_battery_by_id(self, battery_id: int) -> Optional[BatteryResponse]:
+        return self.metadata_db.get_battery_by_id(battery_id)
+
+    def get_battery_by_serial(self, serial: str) -> Optional[BatteryResponse]:
+        return self.metadata_db.get_battery_by_serial(serial)
+
+    def delete_battery(self, battery_id: int):
+        return self.metadata_db.delete_battery(battery_id)
+
+    def get_batteries_by_project(self, project_id: int) -> List[BatteryResponse]:
+        return self.metadata_db.get_batteries_by_project(project_id)
+
+    def update_battery_sync(self, battery_id: int, server_id: Optional[int] = None, server_request_id: Optional[int] = None, status: str = 'pending'):
+        return self.metadata_db.update_battery_sync(battery_id, server_id, server_request_id, status)
 

@@ -37,7 +37,7 @@ async function loadSyncProjectDetails() {
 
     // Fetch inverters for this project
     const inverters = await apiCall('/inverters'); // This gets ALL, filter locally or update API
-    const projectInverters = inverters.filter(inv => String(inv.project_id) === String(projId));
+    const projectInverters = (inverters || []).filter(inv => String(inv.project_id) === String(projId));
 
     const tbody = document.getElementById('sync-inverters-body');
     tbody.innerHTML = projectInverters.map(inv => {
@@ -58,6 +58,36 @@ async function loadSyncProjectDetails() {
         </tr>
     `}).join('');
 
+    // Fetch batteries for this project
+    const batteries = await apiCall('/batteries');
+    const projectBatteries = (batteries || []).filter(b => String(b.project_id) === String(projId));
+
+    const battTbody = document.getElementById('sync-batteries-body');
+    if (battTbody) {
+        if (projectBatteries.length === 0) {
+            battTbody.innerHTML = '<tr><td colspan="5" style="text-align:center; opacity:0.5;">Dự án này chưa có Pin lưu trữ nào.</td></tr>';
+        } else {
+            battTbody.innerHTML = projectBatteries.map(b => {
+                const isApproved = b.sync_status === 'approved';
+                return `
+                <tr>
+                    <td>${b.serial_number}</td>
+                    <td><strong>${b.brand}</strong> - ${b.model}</td>
+                    <td><span class="badge ${isApproved ? 'success' : 'warning'}">${b.sync_status || 'pending'}</span></td>
+                    <td>${b.server_id ? 'ID: ' + b.server_id : (b.server_request_id ? 'Req: ' + b.server_request_id : '-')}</td>
+                    <td>
+                        <div style="display:flex; gap: 5px;">
+                            <button class="action-btn" style="color:var(--success); ${isApproved ? 'display:none' : ''}" onclick="handleBatterySync(${b.id})" title="Create"><i class="fas fa-plus"></i></button>
+                            <button class="action-btn" style="color:var(--warning); ${isApproved ? '' : 'display:none'}" onclick="handleBatterySync(${b.id})" title="Update"><i class="fas fa-edit"></i></button>
+                            <button class="action-btn delete" onclick="handleDeleteSync('battery', ${b.id})" title="Delete"><i class="fas fa-trash"></i></button>
+                        </div>
+                    </td>
+                </tr>
+                `;
+            }).join('');
+        }
+    }
+
     // Cấu hình nút bấm cho Project
     const isProjectApproved = project.sync_status === 'approved';
     const btnCreate = document.getElementById('btn-sync-create');
@@ -71,8 +101,6 @@ async function loadSyncProjectDetails() {
         btnUpdate.style.display = 'none';
     }
 
-    // Update button visibility based on the project state if needed
-    // (Here we render all 3 buttons for explicitly handling create, update, delete requests)
     detailsDiv.classList.remove('hidden');
 }
 
@@ -93,7 +121,7 @@ async function handleSync() {
             msg.innerText = res.message || "Đồng bộ thành công!";
             msg.className = "text-success";
             alert(res.message);
-            loadSync(); // Refresh lists
+            loadSync();
             loadSyncProjectDetails();
         } else {
             msg.innerText = "Đồng bộ thất bại: " + (res ? res.detail : "Lỗi không xác định");
@@ -117,7 +145,7 @@ async function handleInverterSync(invId) {
         if (res && res.ok) {
             msg.innerText = res.message || "Đồng bộ biến tần thành công!";
             msg.className = "text-success";
-            loadSyncProjectDetails(); // Refresh table
+            loadSyncProjectDetails();
         } else {
             msg.innerText = "Lỗi đồng bộ biến tần: " + (res ? res.detail : "Lỗi không xác định");
             msg.className = "text-danger";
@@ -128,11 +156,32 @@ async function handleInverterSync(invId) {
     }
 }
 
+async function handleBatterySync(battId) {
+    const msg = document.getElementById('sync-status-msg');
+    msg.innerText = `Đang đồng bộ Pin lưu trữ ${battId}...`;
+    msg.className = "text-primary";
+
+    try {
+        const res = await apiCall(`/sync/battery/${battId}`, 'POST');
+        if (res && res.ok) {
+            msg.innerText = res.message || "Đồng bộ Pin lưu trữ thành công!";
+            msg.className = "text-success";
+            loadSyncProjectDetails();
+        } else {
+            msg.innerText = "Lỗi đồng bộ Pin: " + (res ? res.detail : "Lỗi không xác định");
+            msg.className = "text-danger";
+        }
+    } catch (e) {
+        msg.innerText = "Lỗi kết nối: " + e.message;
+        msg.className = "text-danger";
+    }
+}
+
 async function handleDeleteSync(type, id = null) {
     const msg = document.getElementById('sync-status-msg');
-    const endpoint = type === 'project' 
-        ? `/sync/project/${document.getElementById('sync-project-select').value}/delete`
-        : `/sync/inverter/${id}/delete`;
+    let endpoint = `/sync/project/${document.getElementById('sync-project-select').value}/delete`;
+    if (type === 'inverter') endpoint = `/sync/inverter/${id}/delete`;
+    if (type === 'battery') endpoint = `/sync/battery/${id}/delete`;
 
     if (!confirm(`Bạn có chắc chắn muốn gửi yêu cầu XÓA ${type} này lên server không?`)) return;
 

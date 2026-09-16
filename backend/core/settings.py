@@ -119,3 +119,13 @@ SECRET_KEY = os.getenv("SECRET_KEY", "hirubic_local_secret_key_change_me")
 ALGORITHM = os.getenv("ALGORITHM", "HS256")
 ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", "30"))
 REFRESH_TOKEN_EXPIRE_MINUTES = int(os.getenv("REFRESH_TOKEN_EXPIRE_MINUTES", "10080")) # 7 days default
+
+# ===========================================================
+# ZERO EXPORT
+# ===========================================================
+ZERO_EXPORT_INTERVAL_SEC        = int(os.getenv("ZERO_EXPORT_INTERVAL_SEC", "10"))
+ZERO_EXPORT_DEFAULT_DEADBAND_W  = float(os.getenv("ZERO_EXPORT_DEFAULT_DEADBAND_W", "200"))
+ZERO_EXPORT_DEFAULT_GAIN        = float(os.getenv("ZERO_EXPORT_DEFAULT_GAIN", "1.0"))
+ZERO_EXPORT_DEFAULT_RAMP_KW     = float(os.getenv("ZERO_EXPORT_DEFAULT_RAMP_KW", "50.0"))
+ZERO_EXPORT_METER_FAIL_THRESHOLD = int(os.getenv("ZERO_EXPORT_METER_FAIL_THRESHOLD", "10"))
+# Số lần meter mất kết nối liên tiếp (×10s = 100s) trước khi set inverter = 0 kW và báo METER_FAULT

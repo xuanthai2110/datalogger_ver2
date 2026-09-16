@@ -173,6 +173,9 @@ function switchInnerTab(tabId) {
     if (tabId === 'evn-tab') {
         if (typeof loadEVNVPN === 'function') loadEVNVPN();
     }
+    else if (tabId === 'ze-tab') {
+        if (typeof initZeroExportTab === 'function') initZeroExportTab();
+    }
 }
 
 function toggleCommFields() {

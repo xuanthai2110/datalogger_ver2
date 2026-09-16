@@ -103,8 +103,8 @@ class MqttSubscriber:
                 return
 
             for topic in topics:
-                self.client.subscribe(topic)
-                logger.info(f"[MQTT] Subscribed to {topic}")
+                self.client.subscribe(topic, qos=1)
+                logger.info(f"[MQTT] Subscribed to {topic} with QoS 1")
         else:
             logger.error(f"[MQTT] Connect return code {rc}")
 

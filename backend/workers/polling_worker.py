@@ -33,7 +33,7 @@ class PollingWorker(threading.Thread):
         while not self._stop_event.is_set():
             t0 = time.time()
             try:
-                logger.info("--- Starting new Polling Cycle ---")
+                logger.debug("--- Starting new Polling Cycle ---")
                 # 1. Lấy cấu hình từ cache (hoặc database nếu hết hạn)
                 polling_config = self.service.get_polling_config()
                 
